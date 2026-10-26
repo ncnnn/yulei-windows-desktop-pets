@@ -13,8 +13,8 @@
 
 ```bash
 git add -A
-git commit -m "release: v1.0.0"
-git tag v1.0.0
+git commit -m "release: v1.0.1"
+git tag v1.0.1
 git push origin main --tags
 ```
 
@@ -38,7 +38,7 @@ git push origin main --tags
 下载后可在 PowerShell 校验：
 
 ```powershell
-Get-FileHash .\LeiYu-Desktop-Pets-Windows-v1.0.0-x64-setup.exe -Algorithm SHA256
+Get-FileHash .\LeiYu-Desktop-Pets-Windows-v1.0.1-x64-setup.exe -Algorithm SHA256
 # 与 SHA256SUMS.txt 中对应行比对
 ```
 

@@ -15,6 +15,7 @@ dist-onedir/
 *.spec.tmp
 *.egg-info/
 LeiYu-Desktop-Pets-Windows-*.zip
+LeiYu-Desktop-Pets-Windows-*-portable/
 
 # Local and imported third-party assets
 local-assets/

@@ -41,6 +41,7 @@ class FakeAudio(QObject):
     position_changed = Signal(str, int, float)
     finished = Signal(str, int)
     stopped = Signal()
+    error = Signal(str)
 
     def __init__(self) -> None:
         super().__init__()
@@ -52,6 +53,9 @@ class FakeAudio(QObject):
 
     def stop(self) -> None:
         self.stopped.emit()
+
+    def set_volume(self, volume: float) -> None:
+        pass
 
 
 def build_controller(asset_pack_factory: Callable[..., Path]):
@@ -65,15 +69,16 @@ def build_controller(asset_pack_factory: Callable[..., Path]):
     return controller, windows, audio
 
 
-def test_click_near_runs_lei_then_yu(asset_pack_factory) -> None:
+def test_click_plays_selected_role_even_when_near(asset_pack_factory) -> None:
     controller, windows, audio = build_controller(asset_pack_factory)
+    windows["yu"].rect = Rect(80, 0, 100, 100)  # 与 lei 重叠，near=True
+    assert controller.update_proximity() is True
+
     controller.handle_click("yu")
-    assert audio.calls[0][0] == "lei"
-    assert windows["lei"].speaking is True
-    role, clip_id, _ = audio.calls[0]
-    audio.finished.emit(role, clip_id)
-    assert audio.calls[1][0] == "yu"
+
+    assert [call[0] for call in audio.calls] == ["yu"]
     assert windows["yu"].speaking is True
+    assert windows["lei"].speaking is False
 
 
 def test_click_far_only_plays_selected_role(asset_pack_factory) -> None:
@@ -81,6 +86,16 @@ def test_click_far_only_plays_selected_role(asset_pack_factory) -> None:
     windows["yu"].rect = Rect(1000, 0, 100, 100)
     controller.handle_click("yu")
     assert [call[0] for call in audio.calls] == ["yu"]
+
+
+def test_pair_dialogue_still_available_via_menu(asset_pack_factory) -> None:
+    controller, windows, audio = build_controller(asset_pack_factory)
+    windows["yu"].rect = Rect(80, 0, 100, 100)
+    assert controller.start_pair(1) is True
+    assert audio.calls[0][0] == "lei"
+    role, clip_id, _ = audio.calls[0]
+    audio.finished.emit(role, clip_id)
+    assert audio.calls[1][0] == "yu"
 
 
 def test_voice_switch_stops_and_uses_helium(asset_pack_factory) -> None:
@@ -97,3 +112,18 @@ def test_hidden_peer_disables_pairing_and_tilt(asset_pack_factory) -> None:
     controller.handle_click("lei")
     assert [call[0] for call in audio.calls] == ["lei"]
     assert windows["lei"].tilt == 0
+
+
+def test_audio_error_clears_speaking_and_reports(asset_pack_factory) -> None:
+    controller, windows, audio = build_controller(asset_pack_factory)
+    controller.handle_click("yu")
+    assert windows["yu"].speaking is True
+
+    messages: list[str] = []
+    controller.playback_error.connect(messages.append)
+    audio.error.emit("缺少多媒体后端")
+
+    assert windows["yu"].speaking is False
+    assert windows["lei"].speaking is False
+    assert windows["yu"].caption == ""
+    assert messages == ["缺少多媒体后端"]

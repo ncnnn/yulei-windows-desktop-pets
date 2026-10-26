@@ -13,6 +13,7 @@ class FakeAudio(QObject):
     position_changed = Signal(str, int, float)
     finished = Signal(str, int)
     stopped = Signal()
+    error = Signal(str)
 
     def __init__(self) -> None:
         super().__init__()

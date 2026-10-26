@@ -19,10 +19,10 @@ python -m venv .venv
 pwsh -File scripts\build_onedir.ps1 -Python .venv\Scripts\python.exe
 
 # 3) 便携版 ZIP（写入 portable.ini，并跑素材门禁）
-pwsh -File scripts\make_portable_zip.ps1 -Python .venv\Scripts\python.exe -Version 1.0.0
+pwsh -File scripts\make_portable_zip.ps1 -Python .venv\Scripts\python.exe -Version 1.0.1
 
 # 4) 安装器（需 Inno Setup 6）
-& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DAppVersion=1.0.0 packaging\leiyu.iss
+& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DAppVersion=1.0.1 packaging\leiyu.iss
 ```
 
 ## 产物
@@ -30,8 +30,8 @@ pwsh -File scripts\make_portable_zip.ps1 -Python .venv\Scripts\python.exe -Versi
 | 产物 | 路径 |
 | --- | --- |
 | onedir | `dist\leiyu_pet\leiyu_pet.exe` + `_internal\` |
-| 便携版 | `LeiYu-Desktop-Pets-Windows-1.0.0-x64-portable.zip` |
-| 安装器 | `dist\installer\LeiYu-Desktop-Pets-Windows-v1.0.0-x64-setup.exe` |
+| 便携版 | `LeiYu-Desktop-Pets-Windows-1.0.1-x64-portable.zip` |
+| 安装器 | `dist\installer\LeiYu-Desktop-Pets-Windows-v1.0.1-x64-setup.exe` |
 
 ## 打包要点
 

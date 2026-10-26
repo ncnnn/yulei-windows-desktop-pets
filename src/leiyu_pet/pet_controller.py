@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Protocol, cast
 
-from PySide6.QtCore import QObject, QTimer
+from PySide6.QtCore import QObject, QTimer, Signal
 
 from .dialogue import DialogueController
 from .models import AssetPack, PlaybackCommand, Role, VoiceMode
@@ -27,6 +27,8 @@ class PetWindowPort(Protocol):
 
 
 class PetController(QObject):
+    playback_error = Signal(str)
+
     def __init__(
         self,
         pack: AssetPack,
@@ -54,6 +56,7 @@ class PetController(QObject):
         audio.position_changed.connect(self._on_audio_position)
         audio.finished.connect(self._on_audio_finished)
         audio.stopped.connect(self._on_audio_stopped)
+        audio.error.connect(self._on_audio_error)
 
         self.timer = QTimer(self)
         self.timer.setInterval(100)
@@ -95,10 +98,13 @@ class PetController(QObject):
         return self.proximity.near
 
     def handle_click(self, role: Role) -> None:
-        if self.update_proximity() and self.both_visible():
-            self.start_pair()
-        else:
-            self.play_solo(role)
+        """点击某只桌宠只播放它自己的独白。
+
+        两人对话由右键/托盘菜单的「两人对话一句」显式触发；这里若按靠近与否
+        改播对话，会出现「点余承东却由雷军先开口」的错位。
+        """
+        self.update_proximity()
+        self.play_solo(role)
 
     def play_solo(self, role: Role, clip_id: int | None = None) -> None:
         self.dialogue.cancel()
@@ -183,3 +189,11 @@ class PetController(QObject):
     def _on_audio_stopped(self) -> None:
         for window in self.windows.values():
             window.set_speaking(False)
+
+    def _on_audio_error(self, message: str) -> None:
+        """播放失败时立即清除说话态与字幕，避免停在「一直说话」的样子。"""
+        self.dialogue.cancel()
+        for window in self.windows.values():
+            window.set_speaking(False)
+            window.set_caption("")
+        self.playback_error.emit(message)

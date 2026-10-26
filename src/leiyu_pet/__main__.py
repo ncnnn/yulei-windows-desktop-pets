@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from . import __version__
@@ -91,6 +92,18 @@ def apply_config(runtime, settings) -> None:
         window.set_click_through(settings.click_through)
 
 
+def _log_playback_error(message: str) -> None:
+    """把播放失败写进日志，避免无声失败无从排查。"""
+    from . import paths
+
+    try:
+        with paths.log_path().open("a", encoding="utf-8") as stream:
+            stamp = datetime.now().isoformat(timespec="seconds")
+            stream.write(f"{stamp} 播放失败：{message}\n")
+    except OSError:
+        pass
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
@@ -130,6 +143,7 @@ def main(argv: list[str] | None = None) -> int:
 
     runtime = PetRuntime(pack, show=True)
     apply_config(runtime, cfg)
+    runtime.controller.playback_error.connect(_log_playback_error)
 
     def open_settings() -> None:
         SettingsDialog(runtime, cfg).exec()

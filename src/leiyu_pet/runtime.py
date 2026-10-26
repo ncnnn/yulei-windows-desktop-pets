@@ -87,9 +87,11 @@ class PetRuntime(QObject):
         self.controller.update_proximity()
 
     def reset_positions_if_needed(self) -> None:
-        for role in cast(tuple[Role, Role], ("lei", "yu")):
-            window = self.windows[role]
-            if window.pos() == QPoint(0, 0):
+        """启动时确保两只不会重叠，否则会被误判为「靠近」而改变点击行为。"""
+        lei = self.windows["lei"].pos()
+        yu = self.windows["yu"].pos()
+        if lei == QPoint(0, 0) or yu == QPoint(0, 0) or lei == yu:
+            for role in cast(tuple[Role, Role], ("lei", "yu")):
                 self.reset_position(role)
 
     def close(self) -> None:

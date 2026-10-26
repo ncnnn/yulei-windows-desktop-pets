@@ -8,8 +8,8 @@
 
 从 Releases 下载：
 
-- `LeiYu-Desktop-Pets-Windows-v1.0.0-x64-setup.exe` — 安装版，装到 `%LOCALAPPDATA%\Programs\LeiYuDesktopPets`，无需管理员权限；
-- `LeiYu-Desktop-Pets-Windows-v1.0.0-x64-portable.zip` — 便携版，解压即用，数据写在同目录 `data\`；
+- `LeiYu-Desktop-Pets-Windows-v1.0.1-x64-setup.exe` — 安装版，装到 `%LOCALAPPDATA%\Programs\LeiYuDesktopPets`，无需管理员权限；
+- `LeiYu-Desktop-Pets-Windows-1.0.1-x64-portable.zip` — 便携版，解压即用，数据写在同目录 `data\`；
 - `SHA256SUMS.txt` — 校验和。
 
 > 安装包未做代码签名，Windows SmartScreen 可能提示；选择“更多信息 → 仍要运行”即可。
@@ -19,7 +19,8 @@
 ## 功能
 
 - 两只独立、透明、置顶、无边框窗口，可拖动；按 PNG alpha 命中检测。
-- 单击随机独白、两人对话一句；逐句字幕气泡。
+- 单击某只桌宠只播放它自己的独白；「两人对话一句」由右键/托盘菜单触发。
+- 逐句字幕气泡，随音频进度同步。
 - 靠近时互相歪头（距离可调），说话时轻微弹动。
 - 原声 / 1.5 倍氦气两种配音，音量可调。
 - 托盘菜单 + 右键菜单：显隐、播放、音量、距离、人物大小、声音模式、恢复位置、退出。

@@ -40,6 +40,8 @@ class FakePlayer(QObject):
         self.output: object | None = None
         self.play_calls = 0
         self.stop_calls = 0
+        self.position_value = 0
+        self.status: NamedStatus = NamedStatus("NoMedia")
 
     def setAudioOutput(self, output: object) -> None:
         self.output = output
@@ -53,10 +55,19 @@ class FakePlayer(QObject):
     def stop(self) -> None:
         self.stop_calls += 1
 
+    def position(self) -> int:
+        return self.position_value
+
+    def mediaStatus(self) -> NamedStatus:
+        return self.status
+
     def emit_position(self, milliseconds: int) -> None:
+        self.position_value = milliseconds
         self.positionChanged.emit(milliseconds)
 
     def emit_status(self, status: object) -> None:
+        if isinstance(status, NamedStatus):
+            self.status = status
         self.mediaStatusChanged.emit(status)
 
     def emit_end_of_media(self) -> None:
@@ -235,6 +246,26 @@ def test_volume_is_clamped_to_unit_range(bundle: Bundle) -> None:
 
     bundle.coordinator.set_volume(42)
     assert bundle.output.volume == 1.0
+
+
+def test_watchdog_reports_failure_when_playback_never_starts(
+    bundle: Bundle, tmp_path: Path
+) -> None:
+    bundle.coordinator.play("lei", clip(1), tmp_path / "a.mp3")
+    bundle.coordinator._check_started()
+
+    assert bundle.recorder.events[-1][0] == "error"
+    assert "缺少多媒体后端" in bundle.recorder.events[-1][1]
+    assert bundle.coordinator.is_playing is False
+
+
+def test_watchdog_stays_silent_after_position_advances(bundle: Bundle, tmp_path: Path) -> None:
+    bundle.coordinator.play("lei", clip(1), tmp_path / "a.mp3")
+    bundle.player.position_value = 1200
+    bundle.coordinator._check_started()
+
+    assert "error" not in bundle.recorder.names()
+    assert bundle.coordinator.is_playing is True
 
 
 def test_default_player_and_output_are_created() -> None:

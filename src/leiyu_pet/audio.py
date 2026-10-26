@@ -18,11 +18,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QObject, QUrl, Signal
+from PySide6.QtCore import QObject, QTimer, QUrl, Signal
 
 from .models import Clip, Role
 
 _END_OF_MEDIA = "EndOfMedia"
+_START_TIMEOUT_MS = 2000
 
 
 def _create_player() -> Any:
@@ -63,6 +64,10 @@ class AudioCoordinator(QObject):
         self._playing = False
         self._token = 0
         self._hooks: list[tuple[Any, Any]] = []
+        self._watchdog = QTimer(self)
+        self._watchdog.setSingleShot(True)
+        self._watchdog.setInterval(_START_TIMEOUT_MS)
+        self._watchdog.timeout.connect(self._check_started)
 
     @property
     def current_role(self) -> Role | None:
@@ -86,7 +91,13 @@ class AudioCoordinator(QObject):
                 self.position_changed.emit(role, clip_id, milliseconds / 1000.0)
 
         def on_status(status: Any) -> None:
-            if token != self._token or getattr(status, "name", "") != _END_OF_MEDIA:
+            name = getattr(status, "name", "")
+            if token != self._token:
+                return
+            if name and name != "NoMedia":
+                # 一旦进入加载/缓冲/播放等状态，说明后端已接手，无需再兜底。
+                self._watchdog.stop()
+            if name != _END_OF_MEDIA:
                 return
             self._reset()
             self.finished.emit(role, clip_id)
@@ -110,6 +121,7 @@ class AudioCoordinator(QObject):
 
         self._player.setSource(QUrl.fromLocalFile(str(path)))
         self._player.play()
+        self._watchdog.start()
         self.started.emit(role, clip_id)
 
     def stop(self) -> None:
@@ -126,6 +138,7 @@ class AudioCoordinator(QObject):
 
     def _reset(self) -> None:
         """断开当前播放的回调、停掉设备并清空状态。"""
+        self._watchdog.stop()
         hooks, self._hooks = self._hooks, []
         for signal, slot in hooks:
             signal.disconnect(slot)
@@ -135,6 +148,29 @@ class AudioCoordinator(QObject):
         self._clip_id = None
         self._playing = False
         self._token += 1
+
+    def _check_started(self) -> None:
+        """兜底：若迟迟没有进入加载/播放状态，说明缺少多媒体后端或无法解码。"""
+        if not self._playing:
+            return
+        position = 0
+        get_position = getattr(self._player, "position", None)
+        if callable(get_position):
+            try:
+                position = int(get_position())
+            except (TypeError, ValueError):
+                position = 0
+        status = None
+        get_status = getattr(self._player, "mediaStatus", None)
+        if callable(get_status):
+            try:
+                status = get_status()
+            except (TypeError, ValueError):
+                status = None
+        name = getattr(status, "name", "")
+        if position <= 0 and name in ("", "NoMedia", "LoadingMedia"):
+            self._reset()
+            self.error.emit("音频未能开始播放：缺少多媒体后端或音频格式不受支持")
 
     def _busy(self) -> bool:
         return self._playing or bool(self._hooks)
