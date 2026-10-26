@@ -62,3 +62,50 @@ def test_context_menu_routes_random_action_to_controller(asset_pack_factory, qtb
         menu.close()
     finally:
         runtime.close()
+
+
+def test_context_menu_exposes_crosstalk_and_settings(asset_pack_factory) -> None:
+    pack = load_asset_pack(asset_pack_factory())
+    runtime = PetRuntime(pack, audio=FakeAudio(), show=False)
+    opened: list[int] = []
+    runtime.on_open_settings = lambda: opened.append(1)
+    try:
+        menu = runtime.menu_manager.show("yu", QPoint(5, 5))
+        texts = [action.text() for action in menu.actions()]
+        assert any(text.startswith("相声模式") for text in texts)
+        settings_action = next(a for a in menu.actions() if a.text() == "设置…")
+        settings_action.trigger()
+        assert opened == [1]
+        menu.close()
+    finally:
+        runtime.close()
+
+
+def test_positions_can_be_captured_and_restored(asset_pack_factory) -> None:
+    pack = load_asset_pack(asset_pack_factory())
+    runtime = PetRuntime(pack, audio=FakeAudio(), show=False)
+    try:
+        runtime.windows["lei"].move(60, 80)
+        runtime.windows["yu"].move(420, 90)
+        captured = runtime.capture_positions()
+        assert captured["lei"] == [60, 80]
+        assert captured["yu"] == [420, 90]
+
+        runtime.windows["lei"].move(0, 0)
+        runtime.windows["yu"].move(0, 0)
+        assert runtime.restore_positions(captured) is True
+        assert runtime.windows["lei"].x() == 60
+        assert runtime.windows["yu"].x() == 420
+    finally:
+        runtime.close()
+
+
+def test_restore_positions_rejects_garbage(asset_pack_factory) -> None:
+    pack = load_asset_pack(asset_pack_factory())
+    runtime = PetRuntime(pack, audio=FakeAudio(), show=False)
+    try:
+        assert runtime.restore_positions(None) is False
+        assert runtime.restore_positions({"lei": [], "yu": [1]}) is False
+        assert runtime.restore_positions({"lei": ["a", "b"]}) is False
+    finally:
+        runtime.close()

@@ -26,7 +26,14 @@ def _build_stub_modules():
             self.lock_position = False
             self.lei_visible = True
             self.yu_visible = True
-            self.version = 1
+            self.crosstalk_lines = 6
+            self.remember_position = True
+            self.lei_pos = []
+            self.yu_pos = []
+            self.hotkeys_enabled = True
+            self.check_updates = True
+            self.reduce_motion = False
+            self.version = 2
             self._saved = []
             for key, value in kwargs.items():
                 setattr(self, key, value)
@@ -119,6 +126,7 @@ class FakeController:
         self.voice_mode = "normal"
         self.include_explicit = False
         self.tilt_enabled = True
+        self.crosstalk_lines = 6
         self.proximity = types.SimpleNamespace(distance=32.0)
         self.calls = []
 
@@ -127,6 +135,14 @@ class FakeController:
 
     def start_pair(self):
         self.calls.append(("start_pair",))
+
+    def start_crosstalk(self, lines=None):
+        self.calls.append(("start_crosstalk", lines))
+        return True
+
+    def set_crosstalk_lines(self, lines):
+        self.calls.append(("set_crosstalk_lines", lines))
+        self.crosstalk_lines = lines
 
     def stop_all(self):
         self.calls.append(("stop_all",))
@@ -372,3 +388,50 @@ def test_quit_callback(app):
 
     _action(tray._menu, "退出").trigger()
     assert called == [1]
+
+
+def test_crosstalk_menu_starts_and_sets_lines(app):
+    runtime = FakeRuntime()
+    config = Config()
+    tray = TrayManager(runtime, config)
+    tray.build_menu()
+
+    crosstalk_menu = _submenu(tray, "相声模式")
+    _action(crosstalk_menu, "8 句").trigger()
+    _action(crosstalk_menu, "开始（两只交替连续说）").trigger()
+
+    assert ("set_crosstalk_lines", 8) in runtime.controller.calls
+    assert config.crosstalk_lines == 8
+    assert config._saved
+    assert ("start_crosstalk", None) in runtime.controller.calls
+
+
+def test_crosstalk_starts_after_showing_all(app):
+    runtime = FakeRuntime()
+    runtime.windows["yu"].setVisible(False)
+    attempts = []
+
+    def start_with_hidden_pet(lines=None):
+        visible = all(runtime.windows[role].isVisible() for role in ROLES)
+        attempts.append(visible)
+        return visible
+
+    runtime.controller.start_crosstalk = start_with_hidden_pet
+    tray = TrayManager(runtime, Config())
+    tray.build_menu()
+
+    _action(_submenu(tray, "相声模式"), "开始（两只交替连续说）").trigger()
+
+    assert attempts == [False, True]
+    assert ("show_all",) in runtime.calls
+
+
+def test_notify_shows_balloon(app):
+    tray = TrayManager(FakeRuntime(), Config())
+    messages = []
+    tray._tray.showMessage = lambda *args, **kwargs: messages.append(args)
+
+    tray.notify("新版本", "v1.2.0 可用")
+    tray.notify("出错了", "详情见日志", warning=True)
+
+    assert len(messages) == 2

@@ -11,12 +11,16 @@ class FakeWindow:
     def __init__(self) -> None:
         self.locked: bool | None = None
         self.click_through: bool | None = None
+        self.reduce_motion: bool | None = None
 
     def set_locked(self, value: bool) -> None:
         self.locked = value
 
     def set_click_through(self, value: bool) -> None:
         self.click_through = value
+
+    def set_reduce_motion(self, value: bool) -> None:
+        self.reduce_motion = value
 
 
 class FakeController:
@@ -31,6 +35,9 @@ class FakeController:
 
     def set_tilt_enabled(self, value: bool) -> None:
         self.calls["tilt_enabled"] = value
+
+    def set_crosstalk_lines(self, value: int) -> None:
+        self.calls["crosstalk_lines"] = value
 
 
 class FakeRuntime:
@@ -54,6 +61,12 @@ class FakeRuntime:
 def test_parser_defaults() -> None:
     args = entry.build_parser().parse_args([])
     assert args.reset is False
+    assert args.selftest_audio is False
+
+
+def test_parser_selftest_audio_flag() -> None:
+    args = entry.build_parser().parse_args(["--selftest-audio"])
+    assert args.selftest_audio is True
 
 
 def test_parser_reset_flag() -> None:
@@ -82,6 +95,8 @@ def test_apply_config_propagates_to_runtime_and_windows() -> None:
         yu_visible=True,
         lock_position=True,
         click_through=True,
+        crosstalk_lines=8,
+        reduce_motion=True,
     )
     entry.apply_config(runtime, cfg)
 
@@ -90,10 +105,12 @@ def test_apply_config_propagates_to_runtime_and_windows() -> None:
     assert runtime.controller.calls["voice_mode"] == "helium"
     assert runtime.controller.calls["include_explicit"] is True
     assert runtime.controller.calls["tilt_enabled"] is False
+    assert runtime.controller.calls["crosstalk_lines"] == 8
     assert runtime.visible == {"lei": False, "yu": True}
     assert runtime.windows["lei"].locked is True
     assert runtime.windows["yu"].locked is True
     assert runtime.windows["lei"].click_through is True
+    assert runtime.windows["yu"].reduce_motion is True
 
 
 def _isolate(monkeypatch, tmp_path: Path) -> None:

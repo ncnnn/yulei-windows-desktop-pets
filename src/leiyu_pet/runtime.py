@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import cast
 
-from PySide6.QtCore import QObject, QPoint
+from PySide6.QtCore import QObject, QPoint, QRect
 from PySide6.QtGui import QGuiApplication
 
 from .audio import AudioCoordinator
@@ -13,6 +13,7 @@ from .context_menu import ContextMenuManager
 from .models import AssetPack, Role
 from .pet_controller import PetController
 from .pet_window import PetWindow
+from .platform_win import keep_window_on_screen
 
 
 class PetRuntime(QObject):
@@ -32,6 +33,8 @@ class PetRuntime(QObject):
         self.audio.set_volume(self.volume)
         self.controller = PetController(pack, self.windows, self.audio, parent=self)
         self.menu_manager = ContextMenuManager(self)
+        #: 由主程序注入：右键菜单「设置…」的入口。
+        self.on_open_settings = None
 
         for _role, window in self.windows.items():
             window.click.connect(self.controller.handle_click)
@@ -93,6 +96,34 @@ class PetRuntime(QObject):
         if lei == QPoint(0, 0) or yu == QPoint(0, 0) or lei == yu:
             for role in cast(tuple[Role, Role], ("lei", "yu")):
                 self.reset_position(role)
+
+    def capture_positions(self) -> dict[str, list[int]]:
+        """记录两只桌宠当前位置，供下次启动恢复。"""
+        return {
+            role: [window.x(), window.y()]
+            for role, window in self.windows.items()
+        }
+
+    def restore_positions(self, positions: Mapping[str, Sequence[int]] | None) -> bool:
+        """恢复上次位置；越界或非法值自动夹回可见屏幕。返回是否恢复了任意一只。"""
+        if not positions:
+            return False
+        restored = False
+        for role in cast(tuple[Role, Role], ("lei", "yu")):
+            raw = positions.get(role)
+            if not raw or len(raw) != 2:
+                continue
+            try:
+                x, y = int(raw[0]), int(raw[1])
+            except (TypeError, ValueError):
+                continue
+            window = self.windows[role]
+            rect = keep_window_on_screen(QRect(x, y, window.width(), window.height()))
+            window.move(rect.x(), rect.y())
+            restored = True
+        if restored:
+            self.controller.update_proximity()
+        return restored
 
     def close(self) -> None:
         self.controller.stop_all()

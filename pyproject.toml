@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "leiyu-desktop-pets-windows"
-version = "1.0.1"
+version = "1.1.0"
 description = "Windows 10/11 desktop pets inspired by leiyu-desktop-pets"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"

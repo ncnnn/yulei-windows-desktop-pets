@@ -3,11 +3,12 @@
 param(
     [string]$Python = "python",
     [string]$Name = "leiyu_pet",
-    [string]$Version = "1.0.1"
+    [string]$Version = "1.1.0"
 )
 
-$ErrorActionPreference = "Stop"
-$PSNativeCommandUseErrorActionPreference = $false
+# 原生命令会往 stderr 写日志；把 stderr 当终止错误会让流程中断。
+# 统一改为按退出码判定成败。
+$ErrorActionPreference = "Continue"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 

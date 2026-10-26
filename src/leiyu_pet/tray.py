@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QApplication, QMenu, QStyle, QSystemTrayIcon
 from .autostart import is_enabled, self_check_requested_but_missing, set_enabled
 from .config import Config, save_config
 from .context_menu import ROLE_NAMES
+from .crosstalk import LINE_PRESETS
 from .paths import config_path
 
 ROLES = ("lei", "yu")
@@ -144,6 +145,19 @@ class TrayManager(QObject):
             lambda: rt.controller.play_solo("yu"),
         )
         self._add_action(self._menu, "两人对话一句", rt.controller.start_pair)
+
+        crosstalk_menu = self._menu.addMenu("相声模式")
+        self._submenus.append(crosstalk_menu)
+        self._add_action(crosstalk_menu, "开始（两只交替连续说）", self._start_crosstalk)
+        crosstalk_menu.addSeparator()
+        self._add_radio_group(
+            crosstalk_menu,
+            LINE_PRESETS,
+            label_of=lambda lines: f"{lines} 句",
+            is_checked=lambda lines: int(rt.controller.crosstalk_lines) == lines,
+            on_trigger=self._set_crosstalk_lines,
+        )
+
         self._add_action(self._menu, "停止播放", rt.controller.stop_all)
         self._menu.addSeparator()
 
@@ -213,6 +227,27 @@ class TrayManager(QObject):
 
         quit_handler = self._on_quit or (lambda: QApplication.instance().quit())
         self._add_action(self._menu, "退出", quit_handler)
+
+    def notify(self, title: str, message: str, *, warning: bool = False) -> None:
+        """给主程序用的托盘气泡入口（更新提示、异常兜底）。"""
+        icon = (
+            QSystemTrayIcon.MessageIcon.Warning
+            if warning
+            else QSystemTrayIcon.MessageIcon.Information
+        )
+        self._tray.showMessage(title, message, icon)
+
+    def _start_crosstalk(self) -> None:
+        """相声模式需要两只都在场，先带出来再开始。"""
+        if self.runtime.controller.start_crosstalk():
+            return
+        self.runtime.show_all()
+        self.runtime.controller.start_crosstalk()
+
+    def _set_crosstalk_lines(self, lines: int) -> None:
+        self.runtime.controller.set_crosstalk_lines(lines)
+        self.config.crosstalk_lines = int(lines)
+        save_config(self.config, config_path())
 
     def _toggle_autostart(self, checked: bool) -> None:
         try:

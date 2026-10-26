@@ -32,6 +32,8 @@ class ContextMenuManager(QObject):
         self._add_action(menu, "随机说一段", partial(self.runtime.controller.play_solo, role))
         pair_action = self._add_action(menu, "两人对话一句", self.runtime.controller.start_pair)
         pair_action.setEnabled(self.runtime.controller.update_proximity())
+        lines = self.runtime.controller.crosstalk_lines
+        self._add_action(menu, f"相声模式（交替 {lines} 句）", self._start_crosstalk)
 
         pick_menu = menu.addMenu("挑一段")
         for clip in self.runtime.pack.clips_for(
@@ -73,9 +75,19 @@ class ContextMenuManager(QObject):
         other_action.setChecked(self.runtime.windows[other].isVisible())
         self._add_action(menu, "恢复默认位置", partial(self.runtime.reset_position, role))
         self._add_action(menu, "隐藏当前桌宠", partial(self.runtime.set_role_visible, role, False))
+        open_settings = getattr(self.runtime, "on_open_settings", None)
+        if open_settings is not None:
+            self._add_action(menu, "设置…", open_settings)
         self._add_action(menu, "退出全部", QApplication.instance().quit)
         menu.popup(position)
         return menu
+
+    def _start_crosstalk(self) -> None:
+        """隐藏了一只就先把两只都带出来，再开始交替说。"""
+        if self.runtime.controller.start_crosstalk():
+            return
+        self.runtime.show_all()
+        self.runtime.controller.start_crosstalk()
 
     def _add_voice_menu(self, menu: QMenu) -> None:
         voice_menu = menu.addMenu("声音模式")

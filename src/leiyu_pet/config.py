@@ -12,11 +12,11 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 DEFAULTS: dict[str, object] = {
-    "version": 1,
+    "version": 2,
     "volume": 0.65,
     "distance": 32,
     "tilt_enabled": True,
@@ -27,12 +27,21 @@ DEFAULTS: dict[str, object] = {
     "lock_position": False,
     "lei_visible": True,
     "yu_visible": True,
+    # 相声模式默认句数与是否记住窗口位置
+    "crosstalk_lines": 6,
+    "remember_position": True,
+    "lei_pos": [],
+    "yu_pos": [],
+    # 系统集成开关
+    "hotkeys_enabled": True,
+    "check_updates": True,
+    "reduce_motion": False,
 }
 
 
 @dataclass(slots=True)
 class Config:
-    version: int = 1
+    version: int = 2
     volume: float = 0.65
     distance: int = 32
     tilt_enabled: bool = True
@@ -43,12 +52,34 @@ class Config:
     lock_position: bool = False
     lei_visible: bool = True
     yu_visible: bool = True
+    crosstalk_lines: int = 6
+    remember_position: bool = True
+    lei_pos: list[int] = field(default_factory=list)
+    yu_pos: list[int] = field(default_factory=list)
+    hotkeys_enabled: bool = True
+    check_updates: bool = True
+    reduce_motion: bool = False
+
+
+def _defaults() -> dict[str, object]:
+    """返回一份全新的默认值，避免可变默认值（位置列表）在实例间共享。"""
+    return {
+        key: (list(value) if isinstance(value, list) else value)
+        for key, value in DEFAULTS.items()
+    }
 
 
 def _coerce(key: str, value: object) -> object:
     default = DEFAULTS[key]
     if isinstance(default, bool):
         return bool(value)
+    if isinstance(default, list):
+        if isinstance(value, (list, tuple)) and len(value) == 2:
+            try:
+                return [int(value[0]), int(value[1])]
+            except (TypeError, ValueError):
+                return []
+        return []
     if isinstance(default, int):
         try:
             number = int(value)  # type: ignore[arg-type]
@@ -58,6 +89,8 @@ def _coerce(key: str, value: object) -> object:
             return number if number >= 1 else 1
         if key == "distance":
             return min(max(number, 0), 100)
+        if key == "crosstalk_lines":
+            return min(max(number, 2), 20)
         return number
     if isinstance(default, float):
         try:
@@ -79,19 +112,21 @@ def load_config(path: Path) -> Config:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        return Config(**DEFAULTS)  # type: ignore[arg-type]
+        return Config(**_defaults())  # type: ignore[arg-type]
     except (OSError, json.JSONDecodeError):
         _backup_bad_file(path)
-        return Config(**DEFAULTS)  # type: ignore[arg-type]
+        return Config(**_defaults())  # type: ignore[arg-type]
 
     if not isinstance(raw, dict):
         _backup_bad_file(path)
-        return Config(**DEFAULTS)  # type: ignore[arg-type]
+        return Config(**_defaults())  # type: ignore[arg-type]
 
     data: dict[str, object] = {}
     for key, default in DEFAULTS.items():
         if key in raw:
             data[key] = _coerce(key, raw[key])
+        elif isinstance(default, list):
+            data[key] = list(default)
         else:
             data[key] = default
     return Config(**data)  # type: ignore[arg-type]

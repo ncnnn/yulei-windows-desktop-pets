@@ -127,3 +127,74 @@ def test_audio_error_clears_speaking_and_reports(asset_pack_factory) -> None:
     assert windows["lei"].speaking is False
     assert windows["yu"].caption == ""
     assert messages == ["缺少多媒体后端"]
+
+
+def test_crosstalk_alternates_through_all_lines(asset_pack_factory) -> None:
+    controller, windows, audio = build_controller(asset_pack_factory)
+    controller.set_crosstalk_lines(4)
+
+    assert controller.start_crosstalk() is True
+    assert [call[0] for call in audio.calls] == ["lei"]
+
+    for _ in range(3):
+        role, clip_id, _ = audio.calls[-1]
+        audio.finished.emit(role, clip_id)
+
+    assert [call[0] for call in audio.calls] == ["lei", "yu", "lei", "yu"]
+
+    role, clip_id, _ = audio.calls[-1]
+    audio.finished.emit(role, clip_id)
+    assert len(audio.calls) == 4
+    assert controller.crosstalk_active() is False
+
+
+def test_crosstalk_uses_distinct_pairs_of_clips_per_role(asset_pack_factory) -> None:
+    controller, windows, audio = build_controller(asset_pack_factory)
+    controller.set_crosstalk_lines(6)
+
+    controller.start_crosstalk()
+    for _ in range(5):
+        role, clip_id, _ = audio.calls[-1]
+        audio.finished.emit(role, clip_id)
+
+    lei_ids = [call[1] for call in audio.calls if call[0] == "lei"]
+    yu_ids = [call[1] for call in audio.calls if call[0] == "yu"]
+    assert len(lei_ids) == 3 and len(yu_ids) == 3
+    assert len(set(lei_ids)) == 3
+    assert len(set(yu_ids)) == 3
+
+
+def test_crosstalk_requires_both_pets_visible(asset_pack_factory) -> None:
+    controller, windows, audio = build_controller(asset_pack_factory)
+    windows["yu"].visible = False
+
+    assert controller.start_crosstalk() is False
+    assert audio.calls == []
+
+
+def test_click_cancels_running_crosstalk(asset_pack_factory) -> None:
+    controller, windows, audio = build_controller(asset_pack_factory)
+    controller.set_crosstalk_lines(6)
+    controller.start_crosstalk()
+
+    role, clip_id, _ = audio.calls[-1]
+    audio.finished.emit(role, clip_id)
+    assert len(audio.calls) == 2
+
+    controller.handle_click("yu")
+    assert controller.crosstalk_active() is False
+
+    before = len(audio.calls)
+    role, clip_id, _ = audio.calls[-1]
+    audio.finished.emit(role, clip_id)
+    assert len(audio.calls) == before
+
+
+def test_stop_all_ends_crosstalk(asset_pack_factory) -> None:
+    controller, windows, audio = build_controller(asset_pack_factory)
+    controller.start_crosstalk()
+
+    controller.stop_all()
+
+    assert controller.crosstalk_active() is False
+    assert all(window.speaking is False for window in windows.values())

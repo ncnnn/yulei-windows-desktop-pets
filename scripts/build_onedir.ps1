@@ -5,10 +5,9 @@ param(
     [string]$Name = "leiyu_pet"
 )
 
-$ErrorActionPreference = "Stop"
-# PowerShell 7.3+ 会把原生命令的 stderr 视为错误；PyInstaller 会往 stderr 写日志。
-# 显式关闭该行为，统一用 $LASTEXITCODE 判定成败。
-$PSNativeCommandUseErrorActionPreference = $false
+# 原生命令（PyInstaller）会往 stderr 写日志；把 stderr 当终止错误会让构建中断。
+# 统一改为按退出码判定成败。
+$ErrorActionPreference = "Continue"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 

@@ -4,7 +4,7 @@
 
 #define AppName "雷余双桌宠"
 #ifndef AppVersion
-  #define AppVersion "1.0.1"
+  #define AppVersion "1.1.0"
 #endif
 #define AppPublisher "leiyu-desktop-pets-windows contributors"
 #define AppExe "leiyu_pet.exe"
