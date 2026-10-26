@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import subprocess
+import sys
 from pathlib import Path
 
 # 唯一放行的素材目录（相对路径小写比较）。
@@ -55,7 +56,16 @@ def verify(paths: list[Path], *, bundle: bool) -> list[str]:
     return [reason for path in paths if (reason := forbidden_reason(path, bundle=bundle))]
 
 
+def _use_utf8_stdout() -> None:
+    """英文 Windows 控制台默认 cp1252，无法编码中文提示会直接崩溃，这里强制 UTF-8。"""
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, OSError):
+        pass
+
+
 def main(argv: list[str] | None = None) -> int:
+    _use_utf8_stdout()
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", choices=("tracked", "bundle"), default="tracked")
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])

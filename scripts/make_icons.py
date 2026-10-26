@@ -68,6 +68,10 @@ def build_ico(source: Path, destination: Path, sizes: tuple[int, ...] = ICON_SIZ
 
 
 def main(argv: list[str] | None = None) -> int:
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, OSError):
+        pass
     args = sys.argv[1:] if argv is None else argv
     if QGuiApplication.instance() is None:
         QGuiApplication(sys.argv)
