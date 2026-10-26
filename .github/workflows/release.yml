@@ -1,0 +1,91 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Resolve version
+        id: ver
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart("v")
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Test
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest -q
+
+      - name: Build onedir
+        shell: pwsh
+        run: ./scripts/build_onedir.ps1 -Python python
+
+      - name: Build portable zip
+        shell: pwsh
+        run: ./scripts/make_portable_zip.ps1 -Python python -Version ${{ steps.ver.outputs.version }}
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          & $iscc "/DAppVersion=${{ steps.ver.outputs.version }}" "packaging\leiyu.iss"
+
+      - name: Generate checksums
+        shell: pwsh
+        run: |
+          $version = "${{ steps.ver.outputs.version }}"
+          $files = @(
+            "dist\installer\LeiYu-Desktop-Pets-Windows-v$version-x64-setup.exe",
+            "LeiYu-Desktop-Pets-Windows-$version-x64-portable.zip"
+          )
+          $lines = foreach ($file in $files) {
+            $hash = (Get-FileHash $file -Algorithm SHA256).Hash.ToLower()
+            "$hash  $(Split-Path $file -Leaf)"
+          }
+          $lines | Set-Content SHA256SUMS.txt -Encoding ascii
+          Get-Content SHA256SUMS.txt
+
+      - name: Publish release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $version = "${{ steps.ver.outputs.version }}"
+          $assets = @(
+            "dist\installer\LeiYu-Desktop-Pets-Windows-v$version-x64-setup.exe",
+            "LeiYu-Desktop-Pets-Windows-$version-x64-portable.zip",
+            "SHA256SUMS.txt"
+          )
+          gh release create $tag $assets --title "v$version" --notes @"
+          Windows 10/11 x64 雷余双桌宠。
+
+          - 安装版：LeiYu-Desktop-Pets-Windows-v$version-x64-setup.exe
+          - 便携版：LeiYu-Desktop-Pets-Windows-$version-x64-portable.zip（解压即用）
+          - 校验：SHA256SUMS.txt
+
+          素材为 AI 生成的头像与配音，随包分发。安装包未做代码签名，Windows SmartScreen 可能提示，请选择“仍要运行”。
+          "@

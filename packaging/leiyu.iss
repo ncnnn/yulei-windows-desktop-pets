@@ -3,7 +3,9 @@
 ; 编译：ISCC.exe packaging\leiyu.iss
 
 #define AppName "雷余双桌宠"
-#define AppVersion "1.0.0"
+#ifndef AppVersion
+  #define AppVersion "1.0.0"
+#endif
 #define AppPublisher "leiyu-desktop-pets-windows contributors"
 #define AppExe "leiyu_pet.exe"
 
