@@ -16,6 +16,6 @@
 - PyInstaller：https://pyinstaller.org/en/stable/license.html
 - Inno Setup：https://jrsoftware.org/files/is/license.txt
 
-## 不随公开发行包分发的素材
+## 随包分发的 AI 生成素材
 
-雷军、余承东人物图片、音频及原始视频不属于本项目 MIT 许可范围，权利归各自权利人。公开仓库、自动构建产物与 Release 不包含这些素材；用户只能导入自己有权使用的素材副本。
+`assets/default_pack/` 内的头像（`lei.png`、`yu.png`）与配音（`Clips/`、`Clips-helium/`，共 34 个音频）为项目维护者使用 AI 生成并随包分发，不属于上游代码仓库的素材，也不主张第三方人物肖像或音频权利。除该目录外，散落的人物图与音频仍会被素材门禁拦截。

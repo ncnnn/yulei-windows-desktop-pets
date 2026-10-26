@@ -2,37 +2,44 @@
 
 > Windows 10/11 x64 重构版。GUI 使用 Python + PySide6，发行方式参考 `dsh-pet-indesktop`。
 
-本项目正在把 [yuhanfu513-ops/leiyu-desktop-pets](https://github.com/yuhanfu513-ops/leiyu-desktop-pets) 的 macOS 双桌宠体验重构到 Windows：双透明窗口、拖动与位置记忆、随机独白、靠近问答、逐句字幕、弹动与歪头、原声/氦气模式、系统托盘和开机自启。
+把 [yuhanfu513-ops/leiyu-desktop-pets](https://github.com/yuhanfu513-ops/leiyu-desktop-pets) 的 macOS 双桌宠体验重构到 Windows：双透明置顶窗口、拖动、随机独白、靠近问答、逐句字幕、弹动与歪头、原声/1.5 倍氦气、系统托盘与开机自启。
 
-## 素材说明
+## 下载与安装
 
-**公开仓库和公开 Release 不包含雷军、余承东人物图片、音频或原始视频。** 这些素材不属于上游 MIT 代码许可范围，权利归各自权利人。
+从 Releases 下载：
 
-首次启动会提示导入你有权使用的原项目 `Assets` 文件夹或 ZIP。导入前会检查：
+- `LeiYu-Desktop-Pets-Windows-v1.0.0-x64-setup.exe` — 安装版，装到 `%LOCALAPPDATA%\Programs\LeiYuDesktopPets`，无需管理员权限；
+- `LeiYu-Desktop-Pets-Windows-v1.0.0-x64-portable.zip` — 便携版，解压即用，数据写在同目录 `data\`；
+- `SHA256SUMS.txt` — 校验和。
 
-- `lei.png`、`yu.png` 为透明 PNG；
-- `clips.json`、`clips-helium.json` 的 17 段台词完整；
-- `Clips/`、`Clips-helium/` 中 34 个音频文件齐全；
-- `pairs.json` 的 8 组问答引用有效。
+> 安装包未做代码签名，Windows SmartScreen 可能提示；选择“更多信息 → 仍要运行”即可。
 
-## 当前状态
+数据目录：安装版为 `%APPDATA%\LeiYuDesktopPets`（配置、日志、导入素材）；便携版为 exe 同级 `data\`。
 
-当前处于 Windows 首版开发阶段。目标产物：
+## 功能
 
-- `LeiYu-Desktop-Pets-Windows-v1.0.0-x64-setup.exe`；
-- `LeiYu-Desktop-Pets-Windows-v1.0.0-x64-portable.zip`；
-- `SHA256SUMS.txt`。
+- 两只独立、透明、置顶、无边框窗口，可拖动；按 PNG alpha 命中检测。
+- 单击随机独白、两人对话一句；逐句字幕气泡。
+- 靠近时互相歪头（距离可调），说话时轻微弹动。
+- 原声 / 1.5 倍氦气两种配音，音量可调。
+- 托盘菜单 + 右键菜单：显隐、播放、音量、距离、人物大小、声音模式、恢复位置、退出。
+- 设置面板实时生效；开机自启写入 `HKCU\...\Run`，免提权。
+- 单实例运行；重复启动会把已有实例带到前台。
+
+## 素材
+
+随包 `assets/default_pack/` 提供两只 AI 生成的头像与配音（17 段原声 + 17 段氦气，共 34 个音频、8 组问答），开箱即用。这些素材由项目维护者使用 AI 生成并随包分发，不涉及第三方人物肖像或音频授权。
+
+如需替换为自己的素材：把 `lei.png`、`yu.png`、`clips.json`、`clips-helium.json`、`pairs.json` 以及 `Clips/`、`Clips-helium/` 放入 `assets/default_pack/`，或通过首次启动的导入向导导入到用户数据目录。校验规则见 [`docs/ASSETS.md`](docs/ASSETS.md)。
 
 ## 从源码运行
 
 ```powershell
-# 本地 Python 3.11-3.13
+# 需要 Python 3.11 - 3.13
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -i https://mirrors.aliyun.com/pypi/simple/ -e ".[dev]"
 .\.venv\Scripts\python.exe -m leiyu_pet
 ```
-
-无素材时应用会打开导入向导，不会下载或嵌入第三方素材。
 
 ## 测试
 
@@ -43,9 +50,13 @@ $env:QT_QPA_PLATFORM = "offscreen"
 .\.venv\Scripts\python.exe scripts\verify_public_bundle.py --mode tracked
 ```
 
+## 构建与发布
+
+onedir、便携版与安装器的构建步骤见 [`docs/BUILD.md`](docs/BUILD.md)；打 tag 自动发版流程见 [`docs/RELEASE.md`](docs/RELEASE.md)。
+
 ## 开源许可与致谢
 
-代码与文档采用 MIT 许可证。窗口与拖动交互保留 `LICENSE-SunPet`；第三方依赖和素材边界见 `THIRD_PARTY_NOTICES.md`。
+代码与文档采用 MIT 许可证。窗口与拖动交互保留 `LICENSE-SunPet`；第三方依赖与素材边界见 `THIRD_PARTY_NOTICES.md`。
 
 特别感谢：
 

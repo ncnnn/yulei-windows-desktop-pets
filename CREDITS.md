@@ -6,4 +6,4 @@
 - [MerZlin/dsh-pet-indesktop](https://github.com/MerZlin/dsh-pet-indesktop)：Windows 版采用其 Python + PySide6、系统托盘、开机自启、PyInstaller onedir 与 Inno Setup 的工程思路。
 - [Ganzhe2028/SunPet](https://github.com/Ganzhe2028/SunPet)：窗口与拖动交互的上游参考。
 
-请优先支持和 Star 原作者仓库。本项目不会把上游人物肖像与音频重新打包到公开发行物中。
+请优先支持和 Star 原作者仓库。随包 `assets/default_pack/` 的头像与配音为项目维护者使用 AI 生成，随包分发；并非上游代码仓库中的素材。
