@@ -11,8 +11,10 @@ htmlcov/
 build/
 dist/
 dist-onedir/
+*.spec
 *.spec.tmp
 *.egg-info/
+LeiYu-Desktop-Pets-Windows-*.zip
 
 # Local and imported third-party assets
 local-assets/
