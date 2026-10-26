@@ -45,6 +45,8 @@ class FakeRuntime:
         self.volume: float | None = None
         self.distance: float | None = None
         self.visible: dict[str, bool] = {}
+        self.sizes: dict[str, int] = {}
+        self.rate: float | None = None
         self.windows = {"lei": FakeWindow(), "yu": FakeWindow()}
         self.controller = FakeController()
 
@@ -56,6 +58,12 @@ class FakeRuntime:
 
     def set_role_visible(self, role: str, visible: bool) -> None:
         self.visible[role] = visible
+
+    def set_pet_size(self, role: str, size: int) -> None:
+        self.sizes[role] = size
+
+    def set_rate(self, rate: float) -> None:
+        self.rate = rate
 
 
 def test_parser_defaults() -> None:
@@ -148,3 +156,16 @@ def test_resolve_pack_returns_none_when_absent(monkeypatch, tmp_path: Path) -> N
     monkeypatch.setattr(entry, "bundled_pack_root", lambda: None)
 
     assert entry.resolve_pack() is None
+
+
+def test_resolve_pack_reports_validation_error(
+    monkeypatch, tmp_path: Path, asset_pack_factory
+) -> None:
+    pack_dir = asset_pack_factory()
+    (pack_dir / "clips.json").write_text("{}", encoding="utf-8")
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setattr(entry, "bundled_pack_root", lambda: pack_dir)
+
+    problems: list[str] = []
+    assert entry.resolve_pack(problems) is None
+    assert problems, "素材损坏时应记录失败原因"

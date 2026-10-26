@@ -117,9 +117,14 @@ class PetWindow(QWidget):
         self.update()
 
     def _character_box(self) -> QRectF:
-        """绘制用的人物框（含 bob 偏移，未旋转/未压缩），保留亚像素精度。"""
+        """绘制用的人物框（含 bob、跳跃与抖动偏移，未旋转/未压缩）。"""
         pose = self._animation.pose
-        return QRectF(PAD_X, TOP - pose.bob, self._pet_size, self._pet_size)
+        return QRectF(
+            PAD_X + pose.offset_x,
+            TOP - pose.bob - pose.offset_y,
+            self._pet_size,
+            self._pet_size,
+        )
 
     def character_rect(self) -> QRect:
         """人物本体的窗口局部整数矩形（含 bob 偏移，未旋转/未压缩）。"""
@@ -180,10 +185,21 @@ class PetWindow(QWidget):
         return self._animation.pose
 
     def tick(self) -> Pose:
-        """推进一帧动画并重绘。"""
+        """推进一帧动画并重绘，同时把说话脉冲传给字幕气泡。"""
         pose = self._animation.advance()
+        self._caption.set_pulse(self._animation.pulse)
         self.update()
         return pose
+
+    def jump(self) -> None:
+        """点击反馈：播放一次跳跃关键帧。"""
+        self._animation.jump()
+        self.update()
+
+    def shake(self) -> None:
+        """出错反馈：播放一次抖动关键帧。"""
+        self._animation.shake()
+        self.update()
 
     def set_animating(self, value: bool) -> None:
         if value:

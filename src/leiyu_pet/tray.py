@@ -20,6 +20,8 @@ SIZE_LABELS = {170: "小", 220: "中", 290: "大"}
 VOICE_VALUES = ("normal", "helium")
 VOICE_LABELS = {"normal": "原声", "helium": "1.5倍氦气版"}
 VOLUMES = (0, 25, 50, 65, 80, 100)
+PLAYBACK_RATES = (0.8, 1.0, 1.25)
+RATE_LABELS = {0.8: "慢放 0.8×", 1.0: "常速 1.0×", 1.25: "快放 1.25×"}
 
 
 class TrayManager(QObject):
@@ -179,6 +181,16 @@ class TrayManager(QObject):
             label_of=lambda p: f"{p}%",
             is_checked=lambda p: round(rt.volume * 100) == p,
             on_trigger=lambda p: rt.set_volume(p / 100),
+        )
+
+        speed_menu = self._menu.addMenu("播放速度")
+        self._submenus.append(speed_menu)
+        self._add_radio_group(
+            speed_menu,
+            PLAYBACK_RATES,
+            label_of=lambda rate: RATE_LABELS[rate],
+            is_checked=lambda rate: abs(rt.controller.playback_rate - rate) < 0.01,
+            on_trigger=lambda rate: rt.set_rate(rate),
         )
 
         distance_menu = self._menu.addMenu("歪头距离")

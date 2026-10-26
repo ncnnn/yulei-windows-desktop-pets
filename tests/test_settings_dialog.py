@@ -140,6 +140,7 @@ class FakeController:
         self.include_explicit = False
         self.tilt_enabled = True
         self.crosstalk_lines = 6
+        self.playback_rate = 1.0
         self.proximity = types.SimpleNamespace(distance=32.0)
         self.calls = []
 
@@ -161,6 +162,10 @@ class FakeController:
 
     def set_volume(self, value):
         self.calls.append(("set_volume", value))
+
+    def set_rate(self, rate):
+        self.calls.append(("set_rate", rate))
+        self.playback_rate = rate
 
     def set_distance(self, value):
         self.calls.append(("set_distance", value))
@@ -184,6 +189,10 @@ class FakeRuntime:
     def set_volume(self, value):
         self.volume = min(max(float(value), 0.0), 1.0)
         self.calls.append(("set_volume", self.volume))
+
+    def set_rate(self, rate):
+        self.calls.append(("set_rate", rate))
+        self.controller.playback_rate = rate
 
     def set_distance(self, value):
         self.calls.append(("set_distance", value))

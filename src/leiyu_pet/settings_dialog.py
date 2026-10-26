@@ -88,6 +88,19 @@ class SettingsDialog(QDialog):
         )
         form.addRow("声音模式", self.voice_combo)
 
+        self.rate_combo = QComboBox()
+        self.rate_combo.setObjectName("playback_rate")
+        for rate, label in ((0.8, "慢放 0.8×"), (1.0, "常速 1.0×"), (1.25, "快放 1.25×")):
+            self.rate_combo.addItem(label, rate)
+        current_rate = float(self.runtime.controller.playback_rate)
+        rate_index = self.rate_combo.findData(current_rate)
+        if rate_index < 0:
+            self.rate_combo.addItem(f"{current_rate:g}×", current_rate)
+            rate_index = self.rate_combo.count() - 1
+        self.rate_combo.setCurrentIndex(rate_index)
+        self.rate_combo.currentIndexChanged.connect(self._on_rate)
+        form.addRow("播放速度", self.rate_combo)
+
         self.explicit_check = QCheckBox("允许第 17 段（含粗口）")
         self.explicit_check.setObjectName("explicit")
         self.explicit_check.setChecked(self.runtime.controller.include_explicit)
@@ -268,6 +281,12 @@ class SettingsDialog(QDialog):
         lines = int(self.crosstalk_combo.itemData(index))
         self.runtime.controller.set_crosstalk_lines(lines)
         self.config.crosstalk_lines = lines
+        self._persist()
+
+    def _on_rate(self, index: int) -> None:
+        rate = float(self.rate_combo.itemData(index))
+        self.runtime.set_rate(rate)
+        self.config.playback_rate = rate
         self._persist()
 
     def _on_reduce_motion(self, checked: bool) -> None:

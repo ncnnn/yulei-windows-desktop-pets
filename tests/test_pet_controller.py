@@ -198,3 +198,30 @@ def test_stop_all_ends_crosstalk(asset_pack_factory) -> None:
 
     assert controller.crosstalk_active() is False
     assert all(window.speaking is False for window in windows.values())
+
+
+def test_pair_starts_even_when_far_apart(asset_pack_factory) -> None:
+    controller, windows, audio = build_controller(asset_pack_factory)
+    windows["yu"].rect = Rect(2000, 0, 100, 100)
+
+    assert controller.start_pair(1) is True
+    assert audio.calls[0][0] == "lei"
+
+
+def test_pair_reports_notice_when_a_pet_is_hidden(asset_pack_factory) -> None:
+    controller, windows, audio = build_controller(asset_pack_factory)
+    windows["yu"].visible = False
+    notices: list[str] = []
+    controller.notice.connect(notices.append)
+
+    assert controller.start_pair(1) is False
+    assert notices and "两只" in notices[0]
+    assert audio.calls == []
+
+
+def test_set_rate_is_clamped_and_forwarded(asset_pack_factory) -> None:
+    controller, windows, audio = build_controller(asset_pack_factory)
+    controller.set_rate(5.0)
+    assert controller.playback_rate == 2.0
+    controller.set_rate(0.1)
+    assert controller.playback_rate == 0.5

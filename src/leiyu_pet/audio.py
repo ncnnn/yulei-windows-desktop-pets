@@ -136,6 +136,13 @@ class AudioCoordinator(QObject):
         if callable(set_volume):
             set_volume(clamped)
 
+    def set_rate(self, rate: float) -> None:
+        """播放速率：0.8 慢放 / 1.0 常速 / 1.25 快放，配合氦气模式共三档音色。"""
+        clamped = min(2.0, max(0.5, float(rate)))
+        set_rate = getattr(self._player, "setPlaybackRate", None)
+        if callable(set_rate):
+            set_rate(clamped)
+
     def _reset(self) -> None:
         """断开当前播放的回调、停掉设备并清空状态。"""
         self._watchdog.stop()

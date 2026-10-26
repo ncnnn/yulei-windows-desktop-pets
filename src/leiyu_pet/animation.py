@@ -18,6 +18,25 @@ MIN_PET_SIZE = 150
 MAX_PET_SIZE = 340
 DEFAULT_PET_SIZE = 220
 
+#: 点击时的跳跃与抖动关键帧参数（秒 / 像素）。
+JUMP_DURATION = 0.50
+JUMP_HEIGHT = 20.0
+SHAKE_DURATION = 0.36
+SHAKE_AMPLITUDE = 7.0
+SHAKE_CYCLES = 3.0
+
+
+def jump_offset(progress: float) -> float:
+    """跳跃关键帧：抛物线，0→最高点→0，progress 取 0..1。"""
+    p = min(max(progress, 0.0), 1.0)
+    return JUMP_HEIGHT * 4.0 * p * (1.0 - p)
+
+
+def shake_offset(progress: float) -> float:
+    """抖动关键帧：衰减正弦，左右晃动后归零。"""
+    p = min(max(progress, 0.0), 1.0)
+    return SHAKE_AMPLITUDE * math.sin(p * math.pi * 2.0 * SHAKE_CYCLES) * (1.0 - p)
+
 
 def ease_towards(current: float, target: float, factor: float = TILT_EASING) -> float:
     """指数缓动：每帧向 target 逼近 factor 比例。"""
@@ -50,6 +69,8 @@ class Pose:
     angle: float = 0.0
     compression: float = 1.0
     bob: float = 0.0
+    offset_x: float = 0.0
+    offset_y: float = 0.0
 
     @property
     def angle_degrees(self) -> float:
@@ -63,6 +84,8 @@ class AnimationState:
     phase: float = 0.0
     speaking: bool = False
     reduce_motion: bool = False
+    jump_progress: float = 1.0
+    shake_progress: float = 1.0
 
     @property
     def pulse(self) -> float:
@@ -75,7 +98,13 @@ class AnimationState:
         """当前姿态快照，不推进状态。"""
         if self.reduce_motion:
             return Pose(self.angle, 1.0, 0.0)
-        return Pose(self.angle, compression_for(self.pulse), bob_for(self.pulse))
+        return Pose(
+            self.angle,
+            compression_for(self.pulse),
+            bob_for(self.pulse),
+            shake_offset(self.shake_progress),
+            jump_offset(self.jump_progress),
+        )
 
     def set_target_angle(self, value: float) -> None:
         self.target_angle = float(value)
@@ -88,17 +117,31 @@ class AnimationState:
     def set_reduce_motion(self, value: bool) -> None:
         self.reduce_motion = bool(value)
 
+    def jump(self) -> None:
+        """播放一次跳跃关键帧（点击反馈）。"""
+        if not self.reduce_motion:
+            self.jump_progress = 0.0
+
+    def shake(self) -> None:
+        """播放一次抖动关键帧（被点击/出错时的反馈）。"""
+        if not self.reduce_motion:
+            self.shake_progress = 0.0
+
     def advance(self) -> Pose:
         """推进一帧（30fps 语义），返回推进后的姿态。"""
         if self.reduce_motion:
             self.angle = self.target_angle
             self.phase = 0.0
+            self.jump_progress = 1.0
+            self.shake_progress = 1.0
             return self.pose
         self.angle = ease_towards(self.angle, self.target_angle)
         if self.speaking:
             self.phase += SPEAK_PHASE_STEP
         else:
             self.phase = 0.0
+        self.jump_progress = min(1.0, self.jump_progress + FRAME_SECONDS / JUMP_DURATION)
+        self.shake_progress = min(1.0, self.shake_progress + FRAME_SECONDS / SHAKE_DURATION)
         return self.pose
 
     def reset(self) -> None:
@@ -106,3 +149,5 @@ class AnimationState:
         self.target_angle = 0.0
         self.phase = 0.0
         self.speaking = False
+        self.jump_progress = 1.0
+        self.shake_progress = 1.0

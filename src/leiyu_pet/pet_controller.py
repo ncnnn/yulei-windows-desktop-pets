@@ -29,6 +29,7 @@ class PetWindowPort(Protocol):
 
 class PetController(QObject):
     playback_error = Signal(str)
+    notice = Signal(str)
 
     def __init__(
         self,
@@ -50,6 +51,7 @@ class PetController(QObject):
         self.dialogue = DialogueController()
         self.crosstalk = CrosstalkDirector()
         self.crosstalk_lines = DEFAULT_LINES
+        self.playback_rate = 1.0
         self._generation = 0
         self._solo_bags: dict[Role, ShuffleBag[int]] = {}
         self._pair_bag = ShuffleBag(pack.pairs)
@@ -107,6 +109,9 @@ class PetController(QObject):
         改播对话，会出现「点余承东却由雷军先开口」的错位。
         """
         self.update_proximity()
+        jump = getattr(self.windows[role], "jump", None)
+        if callable(jump):
+            jump()
         self.play_solo(role)
 
     def play_solo(self, role: Role, clip_id: int | None = None) -> None:
@@ -140,7 +145,15 @@ class PetController(QObject):
         self.crosstalk_lines = clamp_lines(lines)
 
     def start_pair(self, pair_id: int | None = None) -> bool:
-        if not self.update_proximity() or not self.both_visible():
+        """两人对话一句。
+
+        不再要求两只必须靠在一起：距离只影响歪头，不影响能不能聊。离得远时
+        用户点了菜单也照样播，避免「点了没反应」的错觉；只有隐藏了其中一只
+        才拒绝，并明确告知原因。
+        """
+        self.update_proximity()
+        if not self.both_visible():
+            self.notice.emit("需要两只桌宠都在场才能对话，已为你显示全部")
             return False
         if pair_id is None:
             pair = self._pair_bag.next()
@@ -187,6 +200,12 @@ class PetController(QObject):
     def set_volume(self, volume: float) -> None:
         self.audio.set_volume(min(max(float(volume), 0.0), 1.0))
 
+    def set_rate(self, rate: float) -> None:
+        self.playback_rate = min(max(float(rate), 0.5), 2.0)
+        set_rate = getattr(self.audio, "set_rate", None)
+        if callable(set_rate):
+            set_rate(self.playback_rate)
+
     def set_tilt_enabled(self, enabled: bool) -> None:
         self.tilt_enabled = bool(enabled)
         self.update_proximity()
@@ -229,4 +248,7 @@ class PetController(QObject):
         for window in self.windows.values():
             window.set_speaking(False)
             window.set_caption("")
+            shake = getattr(window, "shake", None)
+            if callable(shake):
+                shake()
         self.playback_error.emit(message)

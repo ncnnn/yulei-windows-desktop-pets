@@ -3,7 +3,7 @@
 param(
     [string]$Python = "python",
     [string]$Name = "leiyu_pet",
-    [string]$Version = "1.1.0"
+    [string]$Version = "1.2.0"
 )
 
 # 原生命令会往 stderr 写日志；把 stderr 当终止错误会让流程中断。

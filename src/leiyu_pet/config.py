@@ -36,6 +36,9 @@ DEFAULTS: dict[str, object] = {
     "hotkeys_enabled": True,
     "check_updates": True,
     "reduce_motion": False,
+    "lei_size": 220,
+    "yu_size": 220,
+    "playback_rate": 1.0,
 }
 
 
@@ -59,6 +62,9 @@ class Config:
     hotkeys_enabled: bool = True
     check_updates: bool = True
     reduce_motion: bool = False
+    lei_size: int = 220
+    yu_size: int = 220
+    playback_rate: float = 1.0
 
 
 def _defaults() -> dict[str, object]:
@@ -91,6 +97,8 @@ def _coerce(key: str, value: object) -> object:
             return min(max(number, 0), 100)
         if key == "crosstalk_lines":
             return min(max(number, 2), 20)
+        if key in {"lei_size", "yu_size"}:
+            return min(max(number, 150), 340)
         return number
     if isinstance(default, float):
         try:
@@ -99,6 +107,8 @@ def _coerce(key: str, value: object) -> object:
             return default
         if key == "volume":
             return min(max(number, 0.0), 1.0)
+        if key == "playback_rate":
+            return min(max(number, 0.5), 2.0)
         return number
     return value
 

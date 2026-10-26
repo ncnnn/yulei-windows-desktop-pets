@@ -35,6 +35,8 @@ class PetRuntime(QObject):
         self.menu_manager = ContextMenuManager(self)
         #: 由主程序注入：右键菜单「设置…」的入口。
         self.on_open_settings = None
+        #: 由主程序注入：用于把尺寸/速度等改动写回配置。
+        self.config = None
 
         for _role, window in self.windows.items():
             window.click.connect(self.controller.handle_click)
@@ -63,8 +65,27 @@ class PetRuntime(QObject):
         self.controller.set_distance(distance)
 
     def set_pet_size(self, role: Role, size: int) -> None:
+        """调整人物大小，并立即写回配置（重启后不再丢失）。"""
         self.windows[role].set_pet_size(size)
         self.controller.update_proximity()
+        self._persist_setting(f"{role}_size", int(size))
+
+    def set_rate(self, rate: float) -> None:
+        self.controller.set_rate(rate)
+        self._persist_setting("playback_rate", self.controller.playback_rate)
+
+    def _persist_setting(self, key: str, value) -> None:
+        config = self.config
+        if config is None or getattr(config, key, None) == value:
+            return
+        setattr(config, key, value)
+        from .config import save_config
+        from .paths import config_path
+
+        try:
+            save_config(config, config_path())
+        except OSError:
+            pass
 
     def set_role_visible(self, role: Role, visible: bool) -> None:
         self.windows[role].setVisible(bool(visible))

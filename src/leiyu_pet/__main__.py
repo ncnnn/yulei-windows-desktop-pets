@@ -56,10 +56,12 @@ def bundled_pack_root() -> Path | None:
     return None
 
 
-def resolve_pack():
+def resolve_pack(report: list[str] | None = None):
     """按优先级解析可用素材包：随包默认包 → exe 同级 → 导入 store。
 
-    全部无效时返回 ``None``，由调用方决定是否弹出导入向导。
+    全部无效时返回 ``None``，由调用方决定是否弹出导入向导。校验失败的原因会
+    写进 ``report`` 并记日志——以前这里静默 continue，用户只看到导入向导却不
+    知道素材哪里坏了。
     """
     from . import paths
     from .asset_importer import active_asset_root
@@ -79,7 +81,11 @@ def resolve_pack():
     for root in candidates:
         try:
             return load_asset_pack(root)
-        except AssetValidationError:
+        except AssetValidationError as exc:
+            message = f"{root}：{exc}"
+            if report is not None:
+                report.append(message)
+            LOGGER.warning("素材校验失败 %s", message)
             continue
     return None
 
@@ -94,6 +100,10 @@ def apply_config(runtime, settings) -> None:
     controller.set_include_explicit(settings.include_explicit)
     controller.set_tilt_enabled(settings.tilt_enabled)
     controller.set_crosstalk_lines(settings.crosstalk_lines)
+
+    runtime.set_pet_size("lei", settings.lei_size)
+    runtime.set_pet_size("yu", settings.yu_size)
+    runtime.set_rate(settings.playback_rate)
 
     runtime.set_role_visible("lei", settings.lei_visible)
     runtime.set_role_visible("yu", settings.yu_visible)
@@ -123,7 +133,8 @@ def run_audio_selftest() -> int:
     from PySide6.QtWidgets import QApplication
 
     app = QApplication.instance() or QApplication(sys.argv)
-    pack = resolve_pack()
+    pack_problems: list[str] = []
+    pack = resolve_pack(pack_problems)
     if pack is None:
         print(json.dumps({"ok": False, "error": "未找到可用的素材包"}, ensure_ascii=False))
         return 2
@@ -211,7 +222,8 @@ def main(argv: list[str] | None = None) -> int:
 
     cfg = config.load_config(paths.config_path())
 
-    pack = resolve_pack()
+    pack_problems: list[str] = []
+    pack = resolve_pack(pack_problems)
     if pack is None:
         from .import_wizard import ImportWizard
 
@@ -229,6 +241,7 @@ def main(argv: list[str] | None = None) -> int:
     from .update_check import UpdateChecker
 
     runtime = PetRuntime(pack, show=True)
+    runtime.config = cfg
     apply_config(runtime, cfg)
     restore_window_positions(runtime, cfg)
     runtime.controller.playback_error.connect(_log_playback_error)
@@ -242,6 +255,22 @@ def main(argv: list[str] | None = None) -> int:
 
     tray = TrayManager(runtime, cfg, on_open_settings=open_settings, on_quit=app.quit)
     tray.show()
+    if pack_problems:
+        tray.notify(
+            "素材校验失败",
+            "；".join(pack_problems)[:200],
+            warning=True,
+        )
+    runtime.controller.playback_error.connect(
+        lambda message: tray.notify(
+            "播放失败",
+            f"{message}\n可用 --selftest-audio 检查音频后端",
+            warning=True,
+        )
+    )
+    runtime.controller.notice.connect(
+        lambda message: tray.notify("提示", message)
+    )
     logging_setup.install_excepthook(
         logger,
         notify=lambda title, message: tray.notify(title, message, warning=True),
