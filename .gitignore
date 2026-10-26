@@ -1,0 +1,47 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Build artifacts
+build/
+dist/
+dist-onedir/
+*.spec
+*.spec.tmp
+*.egg-info/
+LeiYu-Desktop-Pets-Windows-*.zip
+
+# Local and imported third-party assets
+local-assets/
+data/
+private/
+.runtime/
+assets/imported/
+
+# User settings and logs
+config.json
+pet.log
+uninstall-cleanup.log
+portable.flag
+
+# Secrets and signing material
+.env
+.env.*
+*.pem
+*.pfx
+*.p12
+
+# WorkBuddy project state
+.workbuddy/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+Desktop.ini

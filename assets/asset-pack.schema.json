@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/leiyu-desktop-pets-windows/asset-pack.schema.json",
+  "title": "LeiYu Desktop Pets Asset Pack",
+  "type": "object",
+  "required": ["clips.json", "clips-helium.json", "pairs.json", "lei.png", "yu.png"],
+  "properties": {
+    "clips.json": { "type": "string" },
+    "clips-helium.json": { "type": "string" },
+    "pairs.json": { "type": "string" },
+    "lei.png": { "type": "string" },
+    "yu.png": { "type": "string" }
+  },
+  "additionalProperties": true
+}
