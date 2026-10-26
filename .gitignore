@@ -34,6 +34,9 @@ portable.flag
 *.pfx
 *.p12
 
+# WorkBuddy project state
+.workbuddy/
+
 # IDE / OS
 .vscode/
 .idea/
