@@ -148,6 +148,9 @@ class PetController(QObject):
         self.proximity.distance = min(max(float(distance), 0.0), 100.0)
         self.update_proximity()
 
+    def set_volume(self, volume: float) -> None:
+        self.audio.set_volume(min(max(float(volume), 0.0), 1.0))
+
     def set_tilt_enabled(self, enabled: bool) -> None:
         self.tilt_enabled = bool(enabled)
         self.update_proximity()
