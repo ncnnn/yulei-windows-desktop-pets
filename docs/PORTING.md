@@ -33,5 +33,3 @@ Qt 相关代码集中在窗口、音频、控制器、托盘、对话框。
 ## 致谢映射
 
 - 玩法与台词结构：[yuhanfu513-ops/leiyu-desktop-pets](https://github.com/yuhanfu513-ops/leiyu-desktop-pets)
-- Windows 工程框架：[MerZlin/dsh-pet-indesktop](https://github.com/MerZlin/dsh-pet-indesktop)
-- 窗口/拖动交互参考：[Ganzhe2028/SunPet](https://github.com/Ganzhe2028/SunPet)

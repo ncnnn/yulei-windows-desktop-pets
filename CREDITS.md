@@ -1,9 +1,11 @@
 # 致谢
 
-本项目向以下作者与项目致敬：
+本项目的玩法与素材来源致敬原作者：
 
-- [yuhanfu513-ops/leiyu-desktop-pets](https://github.com/yuhanfu513-ops/leiyu-desktop-pets)：macOS 原作，提供双桌宠玩法、台词结构、靠近问答、逐句字幕和歪头交互设计。
-- [MerZlin/dsh-pet-indesktop](https://github.com/MerZlin/dsh-pet-indesktop)：Windows 版采用其 Python + PySide6、系统托盘、开机自启、PyInstaller onedir 与 Inno Setup 的工程思路。
-- [Ganzhe2028/SunPet](https://github.com/Ganzhe2028/SunPet)：窗口与拖动交互的上游参考。
+- [yuhanfu513-ops/leiyu-desktop-pets](https://github.com/yuhanfu513-ops/leiyu-desktop-pets)（macOS 原作）
 
-请优先支持和 Star 原作者仓库。随包 `assets/default_pack/` 的头像与配音为项目维护者使用 AI 生成，随包分发；并非上游代码仓库中的素材。
+请优先支持并 Star 原作者仓库。
+
+## 关于素材权利
+
+仓库内随包分发的头像与音频**不在 MIT 许可范围内**，版权归原权利人所有。本项目仅用于学习交流与玩梗，不用于任何商业用途。权利人如认为使用方式不当，欢迎在仓库开 issue，我们会及时移除相关内容。

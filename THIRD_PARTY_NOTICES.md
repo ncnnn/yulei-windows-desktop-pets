@@ -1,21 +1,21 @@
-# 第三方声明
+# 声明与第三方许可
 
-本项目代码采用 MIT 许可证。以下来源与运行时组件保留各自许可证与版权：
+## 素材版权声明（重要）
 
-## 上游项目
-
-- `yuhanfu513-ops/leiyu-desktop-pets`：原始雷余双桌宠的交互设计、台词清单结构、问答顺序与部分算法语义，MIT，Copyright (c) 2026 yuhanfu513-ops。
-- `Ganzhe2028/SunPet`：透明窗口与拖动交互的早期参考，MIT；许可证全文见 `LICENSE-SunPet`。
-- `MerZlin/dsh-pet-indesktop`：PySide6 Windows 窗口、自启、托盘、onedir 与 Inno Setup 工程方法参考，MIT。
+- 本项目**代码**以 MIT 许可发布，详见 `LICENSE`。
+- 项目内随包分发的**音频、头像等素材不在 MIT 许可范围内**，其版权归原权利人所有。
+- 本项目仅用于**学习交流与玩梗**，**不用于任何商业用途**。
+- 权利人如认为相关素材的使用方式不当，请在仓库开 issue 说明，我们会及时移除。
+- 玩法来源致谢：[yuhanfu513-ops/leiyu-desktop-pets](https://github.com/yuhanfu513-ops/leiyu-desktop-pets)。
 
 ## 运行时与构建工具
 
+以下组件按各自许可证分发，与本项目代码许可相互独立：
+
 - Python：https://docs.python.org/3/license.html
-- Qt for Python / PySide6：https://doc.qt.io/qtforpython/licenses.html
-  - PySide6/Qt 动态库按 LGPLv3/GPLv3/商业许可证分发；本项目不修改 Qt 动态库，使用 onedir 方式保留可替换性。
+- Qt for Python / PySide6（含 QtMultimedia 及其 FFmpeg 后端）：
+  https://doc.qt.io/qtforpython/licenses.html
+  - Qt 动态库按 LGPLv3/GPLv3/商业许可证分发。本项目不修改 Qt 动态库，采用 onedir
+    方式分发，保留用户替换 Qt 库的能力。
 - PyInstaller：https://pyinstaller.org/en/stable/license.html
 - Inno Setup：https://jrsoftware.org/files/is/license.txt
-
-## 随包分发的 AI 生成素材
-
-`assets/default_pack/` 内的头像（`lei.png`、`yu.png`）与配音（`Clips/`、`Clips-helium/`，共 34 个音频）为项目维护者使用 AI 生成并随包分发，不属于上游代码仓库的素材，也不主张第三方人物肖像或音频权利。除该目录外，散落的人物图与音频仍会被素材门禁拦截。
