@@ -1,10 +1,18 @@
-"""拒绝把未授权人物与音频带入 Git 历史或公开构建物。"""
+"""素材门禁：只允许随包分发的 AI 素材，拒绝其它位置的人物与音频。
+
+``assets/default_pack/`` 是唯一被放行的素材目录（头像与配音由项目维护者使用
+AI 生成并随包分发）。用户自行导入或散落在别处的人物图与音频一律拦截，
+避免把不可分发或私有的素材带进 Git 历史或公开构建物。
+"""
 
 from __future__ import annotations
 
 import argparse
 import subprocess
 from pathlib import Path
+
+# 唯一放行的素材目录（相对路径小写比较）。
+ALLOWED_ASSET_MARKERS = ("assets/default_pack/",)
 
 FORBIDDEN_NAMES = {"lei.png", "yu.png", "encounter.m4a", "helium-ab.mp3", "preview.png"}
 FORBIDDEN_PARTS = {"clips", "clips-helium", "local-assets", "imported"}
@@ -18,6 +26,8 @@ def normalized(path: Path) -> tuple[str, tuple[str, ...]]:
 
 def forbidden_reason(path: Path, *, bundle: bool) -> str | None:
     text, parts = normalized(path)
+    if any(marker in text for marker in ALLOWED_ASSET_MARKERS):
+        return None
     name = path.name.lower()
     if name in FORBIDDEN_NAMES:
         return f"禁止公开分发的上游素材文件：{text}"
