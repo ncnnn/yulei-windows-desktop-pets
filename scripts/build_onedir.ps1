@@ -6,6 +6,9 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+# PowerShell 7.3+ 会把原生命令的 stderr 视为错误；PyInstaller 会往 stderr 写日志。
+# 显式关闭该行为，统一用 $LASTEXITCODE 判定成败。
+$PSNativeCommandUseErrorActionPreference = $false
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
