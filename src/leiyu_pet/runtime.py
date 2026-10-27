@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import logging
+import random
+import time
 from collections.abc import Mapping, Sequence
 from typing import cast
 
@@ -10,12 +13,30 @@ from PySide6.QtGui import QGuiApplication
 
 from .assistant import PetAssistant
 from .audio import AudioCoordinator
+from .auto_dialog import (
+    clamp_chance,
+    resolve_mode,
+    should_start_dialog,
+)
 from .context_menu import ContextMenuManager
+from .duel_effect import DuelEffect
+from .glass import DEFAULT_RADIUS, REASON_LABELS, REASON_OK, clamp_radius, plan_glass
+from .layout import to_top_left
 from .models import AssetPack, Role
 from .pet_controller import PetController
 from .pet_window import PetWindow
-from .platform_win import keep_window_on_screen
+from .platform_win import display_capabilities, keep_window_on_screen
+from .stick_body import DANCE, WAVE
 from .wander import PlayArea, clamp_position, next_target
+
+#: 决斗特效的触发门槛：歪头超过该角度、或正在拖动时不出现。
+DUEL_TILT_THRESHOLD_DEGREES = 5.0
+#: 刚弹过提醒（番茄钟等）的这段时间内丢弃决斗特效，避免两个动效打架。
+DUEL_NOTICE_QUIET_SECONDS = 2.0
+#: 自动移动触发对话的最小间隔，避免刚聊完又聊。
+AUTO_DIALOG_COOLDOWN_SECONDS = 45.0
+
+logger = logging.getLogger(__name__)
 
 
 class PetRuntime(QObject):
@@ -52,6 +73,25 @@ class PetRuntime(QObject):
         self._wander_step_timer = QTimer(self)
         self._wander_step_timer.setInterval(30)
         self._wander_step_timer.timeout.connect(self._advance_wander)
+
+        # 火柴人随机动作：每隔一段时间招手或跳舞，连续动作有间隔。
+        self._stick_actions_enabled = True
+        self._stick_action_interval = 12
+        self._stick_action_timer = QTimer(self)
+        self._stick_action_timer.timeout.connect(self._maybe_stick_action)
+
+        # 自动移动后按概率发起对话 + 对话开场的决斗特效。
+        self._auto_dialog_chance = 0
+        self._auto_dialog_mode = "crosstalk"
+        self._last_auto_dialog_at = 0.0
+        self._last_notice_at = 0.0
+        self._duel_enabled = True
+        self._duel: DuelEffect | None = None
+        # 半透明面板：记住用户选的圆角，降级时只丢磨砂不丢半径。
+        self._glass_enabled = True
+        self._glass_radius = DEFAULT_RADIUS
+        self.controller.conversation_started.connect(self._on_conversation_started)
+        self.assistant.notice.connect(self._stamp_notice)
 
         for _role, window in self.windows.items():
             window.click.connect(self.controller.handle_click)
@@ -112,6 +152,44 @@ class PetRuntime(QObject):
         for window in self.windows.values():
             window.set_always_on_top(bool(value))
         self._persist_setting("always_on_top", bool(value))
+
+    # -------------------------------------------------------- 半透明面板
+
+    def set_glass(self, enabled: bool, radius: int | None = None) -> None:
+        """半透明磨砂面板：磨砂可降级，圆角始终保留。
+
+        只画不改窗口标志，所以点击穿透与置顶（降级顺序里的前两位）不受影响。
+        """
+        corner = clamp_radius(self._glass_radius if radius is None else radius)
+        compositing, remote = display_capabilities()
+        plan = plan_glass(
+            enabled=bool(enabled),
+            radius=corner,
+            compositing=compositing,
+            remote=remote,
+        )
+        for window in self.windows.values():
+            window.apply_glass_plan(plan)
+        self._glass_enabled = bool(enabled)
+        self._glass_radius = corner
+        self._persist_setting("glass_enabled", bool(enabled))
+        self._persist_setting("corner_radius", corner)
+        if enabled and plan.reason != REASON_OK:
+            logger.info("半透明面板降级：%s", REASON_LABELS.get(plan.reason, plan.reason))
+
+    def toggle_glass(self) -> bool:
+        """右键/托盘开关用：翻转面板开关并落盘，返回切换后的状态。"""
+        enabled = not self._glass_enabled
+        self.set_glass(enabled, self._glass_radius)
+        return enabled
+
+    @property
+    def glass_enabled(self) -> bool:
+        return self._glass_enabled
+
+    @property
+    def glass_radius(self) -> int:
+        return self._glass_radius
 
     def set_wander_enabled(self, enabled: bool, interval_seconds: int | None = None) -> None:
         if interval_seconds is not None:
@@ -178,9 +256,91 @@ class PetRuntime(QObject):
                     step_x, step_y, window.width(), window.height(), area
                 )
             window.move(step_x, step_y)
+        finished = False
         if not self._wander_targets:
             self._wander_step_timer.stop()
+            finished = True
         self.controller.update_proximity()
+        if finished:
+            self._maybe_auto_dialog()
+
+    # ------------------------------------------------------- 自动对话与决斗
+
+    def set_auto_dialog(self, chance: int, mode: str) -> None:
+        """自动移动结束后发起对话的概率与模式（0 表示关闭）。"""
+        self._auto_dialog_chance = clamp_chance(chance)
+        self._auto_dialog_mode = (
+            mode if mode in {"crosstalk", "battle", "random"} else "crosstalk"
+        )
+        self._persist_setting("auto_move_dialog_chance", self._auto_dialog_chance)
+        self._persist_setting("auto_move_dialog_mode", self._auto_dialog_mode)
+
+    def set_duel_effect_enabled(self, enabled: bool) -> None:
+        """决斗特效开关（纯视觉，与决战模式的音量阶梯无关）。"""
+        self._duel_enabled = bool(enabled)
+        self._persist_setting("duel_effect_enabled", self._duel_enabled)
+        if not self._duel_enabled and self._duel is not None:
+            self._duel.stop()
+
+    def _stamp_notice(self, _message: str) -> None:
+        self._last_notice_at = time.monotonic()
+
+    def _on_conversation_started(self, mode: str) -> None:
+        self._play_duel_effect(mode)
+
+    def _duel_center(self) -> QPoint | None:
+        if not self.controller.both_visible():
+            return None
+        lei = self.windows["lei"].face_rect_global()
+        yu = self.windows["yu"].face_rect_global()
+        return QPoint(
+            int((lei.center_x + yu.center_x) / 2),
+            int((lei.y + lei.height / 2 + yu.y + yu.height / 2) / 2),
+        )
+
+    def _play_duel_effect(self, reason: str) -> bool:
+        """每场对话开场出一次；同一时刻只允许一个，后来的丢弃并记日志。"""
+        if not self._duel_enabled:
+            return False
+        if time.monotonic() - self._last_notice_at < DUEL_NOTICE_QUIET_SECONDS:
+            logger.info("决斗特效丢弃：刚弹过提醒（%s）", reason)
+            return False
+        if any(getattr(window, "dragging", False) for window in self.windows.values()):
+            logger.info("决斗特效丢弃：正在拖动（%s）", reason)
+            return False
+        for role, window in self.windows.items():
+            angle = abs(float(getattr(getattr(window, "pose", None), "angle_degrees", 0.0)))
+            if angle > DUEL_TILT_THRESHOLD_DEGREES:
+                logger.info("决斗特效丢弃：%s 歪头 %.1f°（%s）", role, angle, reason)
+                return False
+        center = self._duel_center()
+        if center is None:
+            return False
+        if self._duel is None:
+            self._duel = DuelEffect(self._duel_center)
+        if not self._duel.play_at(center):
+            logger.info("决斗特效丢弃：上一个还没播完（%s）", reason)
+            return False
+        logger.info("决斗特效播放（%s）@ (%d,%d)", reason, center.x(), center.y())
+        return True
+
+    def _maybe_auto_dialog(self) -> None:
+        """自动移动停稳后，按配置概率发起一段对话。"""
+        if not self.controller.both_visible() or self.controller.is_busy():
+            return
+        if not should_start_dialog(self._auto_dialog_chance, random.random()):
+            return
+        if time.monotonic() - self._last_auto_dialog_at < AUTO_DIALOG_COOLDOWN_SECONDS:
+            return
+        mode = resolve_mode(self._auto_dialog_mode)
+        started = (
+            self.controller.start_battle()
+            if mode == "battle"
+            else self.controller.start_crosstalk()
+        )
+        if started:
+            self._last_auto_dialog_at = time.monotonic()
+            logger.info("自动移动后触发对话：%s", mode)
 
     def set_distance(self, distance: float) -> None:
         self.controller.set_distance(distance)
@@ -189,6 +349,49 @@ class PetRuntime(QObject):
         """重叠自动互喷开关：同步控制器并落盘（右键/托盘/设置页共用）。"""
         self.controller.set_overlap_easter_egg(bool(enabled))
         self._persist_setting("overlap_easter_egg", bool(enabled))
+
+    # ------------------------------------------------------------ 火柴人
+
+    def set_stick_body_enabled(self, enabled: bool) -> None:
+        """火柴人躯体总开关；关闭后回到只有大头，窗口回缩但脚不动。"""
+        for window in self.windows.values():
+            window.set_stick_body_enabled(bool(enabled))
+        self.controller.update_proximity()
+        self._persist_setting("stick_body_enabled", bool(enabled))
+        self._schedule_stick_actions()
+
+    def set_stick_action_settings(self, enabled: bool, interval_seconds: int) -> None:
+        self._stick_actions_enabled = bool(enabled)
+        raw = int(interval_seconds)
+        self._stick_action_interval = 0 if raw <= 0 else max(8, raw)
+        self._persist_setting("stick_random_action_enabled", self._stick_actions_enabled)
+        self._persist_setting("stick_action_interval", self._stick_action_interval)
+        self._schedule_stick_actions()
+
+    def _schedule_stick_actions(self) -> None:
+        any_body = any(
+            getattr(window, "stick_enabled", False) for window in self.windows.values()
+        )
+        if self._stick_actions_enabled and self._stick_action_interval > 0 and any_body:
+            self._stick_action_timer.start(self._stick_action_interval * 1000)
+        else:
+            self._stick_action_timer.stop()
+
+    def _maybe_stick_action(self) -> None:
+        """随机动作：只在空闲、可见、未被拖动时挑一只做个动作。"""
+        if self.controller.is_busy():
+            return
+        candidates = [
+            window
+            for window in self.windows.values()
+            if window.isVisible()
+            and getattr(window, "stick_enabled", False)
+            and not getattr(window, "dragging", False)
+        ]
+        if not candidates:
+            return
+        window = random.choice(candidates)
+        window.play_stick_action(random.choice((WAVE, DANCE)), seconds=random.uniform(2.4, 3.6))
 
     def _on_countdown(self, text: str) -> None:
         """番茄钟每秒刷新常驻气泡；正在说话时由控制器自动让位、说完补上。"""
@@ -253,14 +456,14 @@ class PetRuntime(QObject):
                 self.reset_position(role)
 
     def capture_positions(self) -> dict[str, list[int]]:
-        """记录两只桌宠当前位置，供下次启动恢复。"""
+        """记录两只桌宠的**底边中点**，下次启动按同一锚点还原。"""
         return {
-            role: [window.x(), window.y()]
+            role: [window.x() + window.width() // 2, window.y() + window.height()]
             for role, window in self.windows.items()
         }
 
     def restore_positions(self, positions: Mapping[str, Sequence[int]] | None) -> bool:
-        """恢复上次位置；越界或非法值自动夹回可见屏幕。返回是否恢复了任意一只。"""
+        """恢复上次位置（底边中点）；越界或非法值自动夹回可见屏幕。"""
         if not positions:
             return False
         restored = False
@@ -269,10 +472,11 @@ class PetRuntime(QObject):
             if not raw or len(raw) != 2:
                 continue
             try:
-                x, y = int(raw[0]), int(raw[1])
+                center_x, center_y = int(raw[0]), int(raw[1])
             except (TypeError, ValueError):
                 continue
             window = self.windows[role]
+            x, y = to_top_left(center_x, center_y, window.width(), window.height())
             rect = keep_window_on_screen(QRect(x, y, window.width(), window.height()))
             window.move(rect.x(), rect.y())
             restored = True
@@ -283,8 +487,13 @@ class PetRuntime(QObject):
     def close(self) -> None:
         self._wander_timer.stop()
         self._wander_step_timer.stop()
+        self._stick_action_timer.stop()
         self.assistant.stop_polling()
         self.controller.stop_all()
         self.controller.timer.stop()
+        if self._duel is not None:
+            self._duel.stop()
+            self._duel.close()
+            self._duel = None
         for window in self.windows.values():
             window.close()

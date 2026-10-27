@@ -15,11 +15,42 @@ if TYPE_CHECKING:
 
 DEFAULT_FALLBACK_GEOMETRY = (0, 0, 1280, 720)
 MIN_VISIBLE_AREA = 80
+#: GetSystemMetrics 的「当前是远程桌面会话」索引。
+SM_REMOTESESSION = 0x1000
 
 
 def on_windows() -> bool:
     """当前是否运行在 Windows。"""
     return os.name == "nt"
+
+
+def display_capabilities() -> tuple[bool, bool]:
+    """返回 ``(是否开启桌面合成/透明效果, 是否远程桌面会话)``。
+
+    只用于决定「磨砂层画不画」这类纯观感选择，所以任何异常都退化为
+    ``(True, False)``——宁可多画一层，也不要因为探测失败让面板变样。
+    """
+    if not on_windows():
+        return (True, False)
+    try:
+        import ctypes
+
+        user32 = ctypes.windll.user32  # type: ignore[attr-defined]
+        remote = bool(user32.GetSystemMetrics(SM_REMOTESESSION))
+    except Exception:
+        return (True, False)
+
+    compositing = True
+    try:
+        import ctypes
+
+        enabled = ctypes.c_int(0)
+        dwmapi = ctypes.windll.dwmapi  # type: ignore[attr-defined]
+        result = dwmapi.DwmIsCompositionEnabled(ctypes.byref(enabled))
+        compositing = result == 0 and bool(enabled.value)
+    except Exception:
+        compositing = True
+    return (compositing, remote)
 
 
 def primary_working_area() -> tuple[int, int, int, int]:

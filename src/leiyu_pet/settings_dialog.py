@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import __version__, paths
+from .auto_dialog import CHANCE_LABELS, DIALOG_CHANCES, DIALOG_MODES, MODE_LABELS
 from .autostart import is_enabled, set_enabled
 from .config import Config, save_config
 from .context_menu import ROLE_NAMES
@@ -58,6 +59,7 @@ class SettingsDialog(QDialog):
         self._tabs = QTabWidget(self)
         self._tabs.addTab(self._build_sound_tab(), "声音")
         self._tabs.addTab(self._build_interaction_tab(), "互动")
+        self._tabs.addTab(self._build_appearance_tab(), "外观")
         self._tabs.addTab(self._build_system_tab(), "系统")
         self._tabs.addTab(self._build_about_tab(), "关于")
 
@@ -214,6 +216,34 @@ class SettingsDialog(QDialog):
         self.overlap_check.toggled.connect(self._on_overlap)
         form.addRow(self.overlap_check)
 
+        self.auto_dialog_combo = QComboBox()
+        self.auto_dialog_combo.setObjectName("auto_dialog_chance")
+        for percent in DIALOG_CHANCES:
+            self.auto_dialog_combo.addItem(CHANCE_LABELS[percent], percent)
+        current_chance = int(getattr(self.config, "auto_move_dialog_chance", 0))
+        self.auto_dialog_combo.setCurrentIndex(
+            max(self.auto_dialog_combo.findData(current_chance), 0)
+        )
+        self.auto_dialog_combo.currentIndexChanged.connect(self._on_auto_dialog_chance)
+        form.addRow("自动移动后对话", self.auto_dialog_combo)
+
+        self.auto_dialog_mode_combo = QComboBox()
+        self.auto_dialog_mode_combo.setObjectName("auto_dialog_mode")
+        for mode in DIALOG_MODES:
+            self.auto_dialog_mode_combo.addItem(MODE_LABELS[mode], mode)
+        current_mode = str(getattr(self.config, "auto_move_dialog_mode", "crosstalk"))
+        self.auto_dialog_mode_combo.setCurrentIndex(
+            max(self.auto_dialog_mode_combo.findData(current_mode), 0)
+        )
+        self.auto_dialog_mode_combo.currentIndexChanged.connect(self._on_auto_dialog_mode)
+        form.addRow("对话模式", self.auto_dialog_mode_combo)
+
+        self.duel_check = QCheckBox("对话开场播放决斗特效（VS，约 1 秒）")
+        self.duel_check.setObjectName("duel_effect")
+        self.duel_check.setChecked(bool(getattr(self.config, "duel_effect_enabled", True)))
+        self.duel_check.toggled.connect(self._on_duel_effect)
+        form.addRow(self.duel_check)
+
         self.hourly_check = QCheckBox("整点报时（静音气泡，不发声）")
         self.hourly_check.setObjectName("hourly_chime")
         self.hourly_check.setChecked(bool(getattr(self.config, "hourly_chime", False)))
@@ -251,6 +281,109 @@ class SettingsDialog(QDialog):
         )
         self.pomodoro_break_combo.currentIndexChanged.connect(self._on_pomodoro_times)
         form.addRow("番茄钟休息时长", self.pomodoro_break_combo)
+        return page
+
+    # ---------------------------------------------------------------- 系统
+    # ---------------------------------------------------------------- 外观
+    def _build_appearance_tab(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+
+        body_group = QGroupBox("火柴人躯体")
+        form = QFormLayout(body_group)
+
+        self.stick_body_check = QCheckBox("显示火柴人躯体（大头 + 身体）")
+        self.stick_body_check.setObjectName("stick_body")
+        self.stick_body_check.setChecked(bool(getattr(self.config, "stick_body_enabled", True)))
+        self.stick_body_check.toggled.connect(self._on_stick_body)
+        form.addRow(self.stick_body_check)
+
+        self.stick_ratio_combo = QComboBox()
+        self.stick_ratio_combo.setObjectName("stick_ratio")
+        for ratio, label in (
+            (0.6, "小巧"),
+            (0.75, "偏小"),
+            (0.85, "标准"),
+            (1.0, "高挑"),
+            (1.2, "夸张"),
+        ):
+            self.stick_ratio_combo.addItem(label, ratio)
+        current_ratio = float(getattr(self.config, "stick_body_ratio", 0.85))
+        index = self.stick_ratio_combo.findData(current_ratio)
+        self.stick_ratio_combo.setCurrentIndex(index if index >= 0 else 2)
+        self.stick_ratio_combo.currentIndexChanged.connect(self._on_stick_ratio)
+        form.addRow("躯体比例", self.stick_ratio_combo)
+
+        self.stick_axis_combo = QComboBox()
+        self.stick_axis_combo.setObjectName("stick_spin_axis")
+        self.stick_axis_combo.addItem("原地转身（Y 轴翻转）", "flip")
+        self.stick_axis_combo.addItem("平面滚转（旧版风车）", "roll")
+        axis_index = self.stick_axis_combo.findData(
+            getattr(self.config, "stick_spin_axis", "flip")
+        )
+        self.stick_axis_combo.setCurrentIndex(max(axis_index, 0))
+        self.stick_axis_combo.currentIndexChanged.connect(self._on_stick_axis)
+        form.addRow("360° 旋转", self.stick_axis_combo)
+
+        layout.addWidget(body_group)
+
+        action_group = QGroupBox("随机动作")
+        action_form = QFormLayout(action_group)
+        self.stick_random_check = QCheckBox("空闲时随机招手 / 跳舞")
+        self.stick_random_check.setObjectName("stick_random")
+        self.stick_random_check.setChecked(
+            bool(getattr(self.config, "stick_random_action_enabled", True))
+        )
+        self.stick_random_check.toggled.connect(self._on_stick_random)
+        action_form.addRow(self.stick_random_check)
+
+        self.stick_interval_combo = QComboBox()
+        self.stick_interval_combo.setObjectName("stick_interval")
+        for seconds, label in ((0, "关闭"), (8, "8 秒"), (12, "12 秒"), (20, "20 秒"), (30, "30 秒")):
+            self.stick_interval_combo.addItem(label, seconds)
+        current_interval = int(getattr(self.config, "stick_action_interval", 12))
+        interval_index = self.stick_interval_combo.findData(current_interval)
+        self.stick_interval_combo.setCurrentIndex(interval_index if interval_index >= 0 else 2)
+        self.stick_interval_combo.currentIndexChanged.connect(self._on_stick_interval)
+        action_form.addRow("动作间隔", self.stick_interval_combo)
+
+        hint = QLabel("躯体由代码绘制，改比例/线宽不会重新加载素材；关闭后只显示大头。")
+        hint.setWordWrap(True)
+        action_form.addRow(hint)
+        layout.addWidget(action_group)
+
+        glass_group = QGroupBox("窗口质感")
+        glass_form = QFormLayout(glass_group)
+        self.glass_check = QCheckBox("半透明磨砂面板（关掉就只剩透明背景）")
+        self.glass_check.setObjectName("glass")
+        self.glass_check.setChecked(bool(getattr(self.config, "glass_enabled", True)))
+        self.glass_check.toggled.connect(self._on_glass)
+        glass_form.addRow(self.glass_check)
+
+        self.corner_radius_combo = QComboBox()
+        self.corner_radius_combo.setObjectName("corner_radius")
+        for radius, label in (
+            (0, "直角 0px"),
+            (8, "微圆 8px"),
+            (14, "标准 14px"),
+            (20, "圆润 20px"),
+            (28, "很圆 28px"),
+        ):
+            self.corner_radius_combo.addItem(label, radius)
+        current_radius = int(getattr(self.config, "corner_radius", 14))
+        radius_index = self.corner_radius_combo.findData(current_radius)
+        self.corner_radius_combo.setCurrentIndex(radius_index if radius_index >= 0 else 2)
+        self.corner_radius_combo.currentIndexChanged.connect(self._on_corner_radius)
+        glass_form.addRow("圆角半径", self.corner_radius_combo)
+
+        glass_hint = QLabel(
+            "面板只画在透明背景上，不改变置顶与鼠标穿透；"
+            "系统关闭透明效果或处于远程桌面时自动省略磨砂层，圆角保留。"
+        )
+        glass_hint.setWordWrap(True)
+        glass_form.addRow(glass_hint)
+        layout.addWidget(glass_group)
+        layout.addStretch(1)
         return page
 
     # ---------------------------------------------------------------- 系统
@@ -467,8 +600,112 @@ class SettingsDialog(QDialog):
 
     def _on_overlap(self, checked: bool) -> None:
         self.config.overlap_easter_egg = bool(checked)
-        self.runtime.controller.set_overlap_easter_egg(bool(checked))
+        setter = getattr(self.runtime, "set_overlap_easter_egg", None)
+        if callable(setter):
+            setter(bool(checked))
+        else:
+            self.runtime.controller.set_overlap_easter_egg(bool(checked))
         self._persist()
+
+    def _on_auto_dialog_chance(self, index: int) -> None:
+        self.config.auto_move_dialog_chance = int(self.auto_dialog_combo.itemData(index))
+        self._apply_auto_dialog()
+        self._persist()
+
+    def _on_auto_dialog_mode(self, index: int) -> None:
+        self.config.auto_move_dialog_mode = str(self.auto_dialog_mode_combo.itemData(index))
+        self._apply_auto_dialog()
+        self._persist()
+
+    def _apply_auto_dialog(self) -> None:
+        setter = getattr(self.runtime, "set_auto_dialog", None)
+        if callable(setter):
+            setter(
+                int(getattr(self.config, "auto_move_dialog_chance", 0)),
+                str(getattr(self.config, "auto_move_dialog_mode", "crosstalk")),
+            )
+
+    def _on_duel_effect(self, checked: bool) -> None:
+        self.config.duel_effect_enabled = bool(checked)
+        setter = getattr(self.runtime, "set_duel_effect_enabled", None)
+        if callable(setter):
+            setter(bool(checked))
+        self._persist()
+
+    def _on_stick_body(self, checked: bool) -> None:
+        self.config.stick_body_enabled = bool(checked)
+        setter = getattr(self.runtime, "set_stick_body_enabled", None)
+        if callable(setter):
+            setter(bool(checked))
+        else:
+            for window in self.runtime.windows.values():
+                window.set_stick_body_enabled(bool(checked))
+        self._persist()
+
+    def _on_stick_random(self, checked: bool) -> None:
+        self.config.stick_random_action_enabled = bool(checked)
+        self._apply_stick_action_settings()
+        self._persist()
+
+    def _on_stick_interval(self, index: int) -> None:
+        value = self.stick_interval_combo.itemData(index)
+        self.config.stick_action_interval = int(value)
+        self._apply_stick_action_settings()
+        self._persist()
+
+    def _apply_stick_action_settings(self) -> None:
+        setter = getattr(self.runtime, "set_stick_action_settings", None)
+        if callable(setter):
+            setter(
+                bool(getattr(self.config, "stick_random_action_enabled", True)),
+                int(getattr(self.config, "stick_action_interval", 12)),
+            )
+
+    def _on_stick_ratio(self, index: int) -> None:
+        ratio = float(self.stick_ratio_combo.itemData(index))
+        self.config.stick_body_ratio = ratio
+        for window in self.runtime.windows.values():
+            setter = getattr(window, "set_stick_body_ratio", None)
+            if callable(setter):
+                setter(ratio)
+        self._persist()
+
+    def _on_stick_axis(self, index: int) -> None:
+        axis = str(self.stick_axis_combo.itemData(index))
+        self.config.stick_spin_axis = axis
+        for window in self.runtime.windows.values():
+            setter = getattr(window, "set_stick_spin_axis", None)
+            if callable(setter):
+                setter(axis)
+        self._persist()
+
+    def _on_glass(self, checked: bool) -> None:
+        self.config.glass_enabled = bool(checked)
+        self._apply_glass()
+        self._persist()
+
+    def _on_corner_radius(self, index: int) -> None:
+        radius = int(self.corner_radius_combo.itemData(index))
+        self.config.corner_radius = radius
+        self._apply_glass()
+        self._persist()
+
+    def _apply_glass(self) -> None:
+        setter = getattr(self.runtime, "set_glass", None)
+        if callable(setter):
+            setter(
+                bool(getattr(self.config, "glass_enabled", True)),
+                int(getattr(self.config, "corner_radius", 14)),
+            )
+            return
+        from .glass import plan_glass
+
+        plan = plan_glass(
+            enabled=bool(getattr(self.config, "glass_enabled", True)),
+            radius=int(getattr(self.config, "corner_radius", 14)),
+        )
+        for window in self.runtime.windows.values():
+            window.apply_glass_plan(plan)
 
     def _on_hourly(self, checked: bool) -> None:
         self.config.hourly_chime = bool(checked)

@@ -110,10 +110,16 @@ def apply_config(runtime, settings) -> None:
     runtime.set_opacity(settings.opacity)
     runtime.set_caption_font_size(settings.caption_font_size)
     runtime.set_always_on_top(settings.always_on_top)
+    runtime.set_glass(settings.glass_enabled, settings.corner_radius)
     runtime.set_wander_enabled(
         settings.wander_enabled,
         settings.wander_interval_seconds,
     )
+    runtime.set_auto_dialog(
+        settings.auto_move_dialog_chance,
+        settings.auto_move_dialog_mode,
+    )
+    runtime.set_duel_effect_enabled(settings.duel_effect_enabled)
 
     runtime.set_role_visible("lei", settings.lei_visible)
     runtime.set_role_visible("yu", settings.yu_visible)
@@ -122,6 +128,19 @@ def apply_config(runtime, settings) -> None:
         window.set_locked(settings.lock_position)
         window.set_click_through(settings.click_through)
         window.set_reduce_motion(settings.reduce_motion)
+
+    colors = {"lei": settings.stick_color_lei, "yu": settings.stick_color_yu}
+    for role, window in runtime.windows.items():
+        window.set_stick_body_ratio(settings.stick_body_ratio)
+        window.set_stick_line_width(settings.stick_line_width)
+        window.set_stick_neck_overlap(settings.stick_neck_overlap)
+        window.set_stick_color(colors.get(role, settings.stick_color_lei))
+        window.set_stick_spin_axis(settings.stick_spin_axis)
+        window.set_stick_body_enabled(settings.stick_body_enabled)
+    runtime.set_stick_action_settings(
+        settings.stick_random_action_enabled,
+        settings.stick_action_interval,
+    )
 
     from .quiet_hours import in_quiet_hours
 
@@ -136,6 +155,31 @@ def apply_config(runtime, settings) -> None:
         lambda: bool(settings.quiet_hours_enabled)
         and in_quiet_hours(datetime.now(), settings.quiet_start, settings.quiet_end)
     )
+
+
+def migrate_legacy_positions(settings) -> bool:
+    """把旧版「窗口左上角」坐标换算成新版「底边中点」（schema < 4）。
+
+    旧版窗口没有躯体，高度只由人物大小决定；用当时的公式反推底边，脚就
+    不会因为窗口加高而沉到屏幕外。返回是否做过迁移。
+    """
+    if int(getattr(settings, "version", 0)) >= 4:
+        return False
+    from .layout import migrate_top_left
+
+    sizes = {"lei": settings.lei_size, "yu": settings.yu_size}
+    for role in ("lei", "yu"):
+        key = f"{role}_pos"
+        raw = getattr(settings, key, [])
+        if not isinstance(raw, (list, tuple)) or len(raw) != 2:
+            continue
+        try:
+            x, y = int(raw[0]), int(raw[1])
+        except (TypeError, ValueError):
+            continue
+        setattr(settings, key, migrate_top_left(x, y, sizes[role]))
+    settings.version = 4
+    return True
 
 
 def restore_window_positions(runtime, settings) -> None:
@@ -245,6 +289,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     cfg = config.load_config(paths.config_path())
+    if migrate_legacy_positions(cfg):
+        # 迁移后立刻落盘，避免下次启动重复换算。
+        with contextlib.suppress(OSError):
+            config.save_config(cfg, paths.config_path())
 
     pack_problems: list[str] = []
     pack = resolve_pack(pack_problems)

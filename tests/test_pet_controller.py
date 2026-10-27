@@ -19,6 +19,7 @@ class FakeWindow:
         self.speaking = False
         self.tilt = 0.0
         self.caption = ""
+        self.status = ""
         self.spun = 0
         self.nodded = 0
 
@@ -36,6 +37,9 @@ class FakeWindow:
 
     def set_caption(self, text: str) -> None:
         self.caption = text
+
+    def set_status_text(self, text: str) -> None:
+        self.status = text
 
     def spin(self) -> None:
         self.spun += 1
@@ -434,18 +438,19 @@ def test_crosstalk_uses_paired_questions_and_answers(asset_pack_factory) -> None
     assert [call[1] for call in audio.calls] == [1, 2, 3]
 
 
-def test_status_bubble_yields_to_speech_then_returns(asset_pack_factory) -> None:
+def test_status_badge_is_separate_from_the_dialogue_bubble(asset_pack_factory) -> None:
+    """番茄钟倒计时走独立状态条，说话时不会被台词覆盖。"""
     controller, windows, audio = build_controller(asset_pack_factory)
-    assert controller.set_status("lei", "番茄钟 24:00") is True
-    assert windows["lei"].caption == "番茄钟 24:00"
+
+    assert controller.set_status("lei", "番茄钟 · 24:00") is True
+    assert windows["lei"].status == "番茄钟 · 24:00"
+    assert windows["lei"].caption == ""
 
     controller.play_solo("lei", 1)
-    assert controller.set_status("lei", "番茄钟 23:59") is False
 
-    role, clip_id, _path = audio.calls[-1]
-    audio.is_playing = False
-    audio.finished.emit(role, clip_id)
-    assert windows["lei"].caption == "番茄钟 23:59"
+    assert windows["lei"].caption  # 台词在对话气泡里
+    assert windows["lei"].status == "番茄钟 · 24:00"  # 倒计时仍然在
 
     assert controller.clear_status() is True
-    assert windows["lei"].caption == ""
+    assert windows["lei"].status == ""
+    assert windows["lei"].caption  # 清状态条不影响台词

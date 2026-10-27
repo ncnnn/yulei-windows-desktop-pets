@@ -110,6 +110,37 @@ class ContextMenuManager(QObject):
         )
         overlap_action.setChecked(self.runtime.controller.overlap_enabled)
 
+        body_action = self._add_action(
+            menu,
+            "火柴人躯体",
+            self.runtime.set_stick_body_enabled,
+            checkable=True,
+            pass_checked=True,
+        )
+        body_action.setChecked(
+            bool(getattr(config, "stick_body_enabled", True))
+        )
+
+        actions_action = self._add_action(
+            menu,
+            "随机动作（招手/跳舞）",
+            self._toggle_stick_random,
+            checkable=True,
+            pass_checked=True,
+        )
+        actions_action.setChecked(
+            bool(getattr(config, "stick_random_action_enabled", True))
+        )
+
+        glass_action = self._add_action(
+            menu,
+            "半透明磨砂面板",
+            self._toggle_glass,
+            checkable=True,
+            pass_checked=True,
+        )
+        glass_action.setChecked(bool(getattr(config, "glass_enabled", True)))
+
         menu.addSeparator()
         other: Role = "yu" if role == "lei" else "lei"
         other_action = self._add_action(
@@ -140,6 +171,25 @@ class ContextMenuManager(QObject):
             return
         self.runtime.show_all()
         self.runtime.controller.start_battle()
+
+    def _toggle_stick_random(self, checked: bool) -> None:
+        config = getattr(self.runtime, "config", None)
+        if config is not None:
+            config.stick_random_action_enabled = bool(checked)
+        self.runtime.set_stick_action_settings(
+            bool(checked),
+            int(getattr(config, "stick_action_interval", 12)),
+        )
+
+    def _toggle_glass(self, checked: bool) -> None:
+        """面板开关：磨砂会按桌面能力降级，圆角跟随配置。"""
+        config = getattr(self.runtime, "config", None)
+        if config is not None:
+            config.glass_enabled = bool(checked)
+        self.runtime.set_glass(
+            bool(checked),
+            int(getattr(config, "corner_radius", 14)),
+        )
 
     def _start_pomodoro(self) -> None:
         assistant = getattr(self.runtime, "assistant", None)

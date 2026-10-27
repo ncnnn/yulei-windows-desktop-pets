@@ -22,7 +22,7 @@ from leiyu_pet.animation import (
     speaking_pulse,
 )
 from leiyu_pet.caption_widget import PADDING, CaptionWidget
-from leiyu_pet.pet_window import BOTTOM_EXTRA, PAD_X, TOP, PetWindow
+from leiyu_pet.pet_window import BOTTOM_EXTRA, PAD_X, STATUS_HEIGHT, TOP, PetWindow
 
 # 必须在 QApplication 创建之前生效：无显示环境下使用 offscreen 插件，避免弹出可见窗口。
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -122,9 +122,16 @@ def test_window_is_translucent_and_unfocusable(pet: PetWindow) -> None:
 def test_window_size_covers_character_and_caption(pet: PetWindow) -> None:
     assert pet.pet_size == DEFAULT_PET_SIZE
     assert pet.width() == DEFAULT_PET_SIZE + 2 * PAD_X
-    assert pet.height() == DEFAULT_PET_SIZE + TOP + BOTTOM_EXTRA
-    caption = pet.caption_widget
-    assert caption.geometry() == pet.rect().adjusted(0, TOP + pet.pet_size, 0, 0)
+    # 躯体让窗口向下加高，头部盒子仍在原来的位置与大小。
+    content_bottom = pet._content_bottom()
+    assert pet.height() == int(content_bottom) + BOTTOM_EXTRA
+    assert pet.height() > DEFAULT_PET_SIZE + TOP + BOTTOM_EXTRA
+    caption = pet.caption_widget.geometry()
+    assert caption.y() == int(content_bottom)
+    assert caption.height() == BOTTOM_EXTRA - STATUS_HEIGHT
+    # 状态条在字幕下方单独一条，与对话气泡分开
+    assert pet.status_widget.geometry().y() == caption.y() + caption.height()
+    assert pet.status_widget.height() == STATUS_HEIGHT
 
 
 def test_pet_size_is_clamped(pet: PetWindow) -> None:
@@ -273,7 +280,7 @@ def test_click_through_disables_and_restores_hits(pet: PetWindow) -> None:
 
 def test_caption_area_is_draggable(pet: PetWindow) -> None:
     pet.set_caption("你好，世界")
-    inside = QPoint(pet.width() // 2, TOP + pet.pet_size + 10)
+    inside = QPoint(pet.width() // 2, int(pet._content_bottom()) + 10)
     assert pet.hit_test(inside) is True
     pet.set_caption("")
     assert pet.hit_test(inside) is False
@@ -510,3 +517,193 @@ def test_hiding_pauses_animation_timer(qtbot) -> None:
     window.show()
     assert window._timer.isActive()
     window.close()
+
+
+# --------------------------------------------------------------- 火柴人躯体
+
+
+def test_body_toggle_keeps_the_feet_in_place(qtbot) -> None:
+    window = PetWindow("lei", pet_size=220, animate=False)
+    qtbot.addWidget(window)
+    window.show()
+    window.move(100, 120)
+    QApplication.processEvents()
+
+    tall = window.height()
+    bottom = window.y() + window.height()
+
+    window.set_stick_body_enabled(False)
+
+    assert window.height() < tall
+    assert window.y() + window.height() == bottom
+
+
+def test_torso_is_clickable_but_its_sides_are_not(pet: PetWindow) -> None:
+    assert pet.stick_enabled is True
+    center_x = pet.width() // 2
+    y = int(pet._neck_y() + pet._body_height() * 0.8)
+
+    assert pet.hit_test(QPoint(center_x, y)) is True
+    assert pet.hit_test(QPoint(center_x + 60, y)) is False
+
+
+def test_torso_is_not_clickable_after_disabling_body(pet: PetWindow) -> None:
+    pet.set_stick_body_enabled(False)
+    center_x = pet.width() // 2
+    y = int(pet._neck_y() + pet._body_height() * 0.8)
+
+    assert pet.hit_test(QPoint(center_x, y)) is False
+
+
+def test_spin_uses_y_flip_with_a_minimum_width(pet: PetWindow) -> None:
+    pet.animation.spin()
+    # 缓动曲线下 progress≈0.326 对应转满 90°，此时正对侧面。
+    pet.animation.spin_progress = 0.3264
+
+    assert abs(pet._spin_flip()) == pytest.approx(0.42)
+
+    pet.set_stick_spin_axis("roll")
+    assert pet._spin_flip() == 1.0
+
+
+def test_alpha_bounds_are_cached_and_normalized(pet: PetWindow) -> None:
+    bounds = pet.alpha_bounds
+    assert bounds is not None
+    assert 0.0 <= bounds[0] < bounds[2] <= 1.0
+    assert 0.0 <= bounds[1] < bounds[3] <= 1.0
+
+    pet.update()
+    assert pet.alpha_bounds is bounds
+
+
+def test_actions_are_one_shot_and_ignored_without_body(pet: PetWindow) -> None:
+    pet.play_stick_action("wave", 0.4)
+    assert pet.stick_state == "wave"
+
+    pet.set_stick_body_enabled(False)
+    assert pet.stick_state == "idle"
+
+    pet.play_stick_action("dance", 1.0)
+    assert pet.stick_state == "idle"
+
+
+def test_side_view_uses_the_generated_silhouette(pet: PetWindow) -> None:
+    assert pet._side_pixmap is not None
+    assert not pet._side_pixmap.isNull()
+
+    pet.animation.spin()
+    pet.animation.spin_progress = 0.5  # 背面：cos(pi) = -1，仍然用原图
+    assert pet._side_view is False
+
+    pet.animation.spin_progress = 0.3264  # 正对侧面
+    assert pet._side_view is True
+    assert abs(pet._spin_flip()) == pytest.approx(0.42)
+
+
+def test_status_badge_is_a_separate_widget(pet: PetWindow) -> None:
+    pet.set_caption("台词")
+    pet.set_status_text("番茄钟 · 12:34")
+
+    assert pet.caption() == "台词"
+    assert pet.status_text() == "番茄钟 · 12:34"
+    assert pet.status_widget.isHidden() is False
+
+    pet.set_status_text("")
+    assert pet.status_widget.isHidden() is True
+    assert pet.caption() == "台词"  # 清状态条不影响台词
+
+
+# ------------------------------------------------------------- 半透明面板
+
+
+def test_glass_panel_is_off_until_runtime_applies_it(pet: PetWindow) -> None:
+    assert pet.glass_enabled is False
+    assert pet.glass_plan.panel is False
+    assert pet.panel_rect().isEmpty()
+
+
+def test_set_glass_enables_frosted_rounded_panel(pet: PetWindow) -> None:
+    pet.set_glass(True, 14)
+    assert pet.glass_enabled is True
+    assert pet.glass_frosted is True
+    assert pet.glass_radius == 14
+    assert pet.glass_plan.reason == "ok"
+
+
+def test_set_glass_keeps_radius_when_frost_degrades(pet: PetWindow) -> None:
+    """降级顺序：磨砂先丢，圆角保留。"""
+    pet.set_glass(True, 20, compositing=False)
+    assert pet.glass_enabled is True
+    assert pet.glass_frosted is False
+    assert pet.glass_radius == 20
+
+    pet.set_glass(True, 20, remote=True)
+    assert pet.glass_frosted is False
+    assert pet.glass_radius == 20
+
+
+def test_set_glass_clamps_radius(pet: PetWindow) -> None:
+    pet.set_glass(True, 999)
+    assert pet.glass_radius == 28
+    pet.set_glass(True, -5)
+    assert pet.glass_radius == 0
+
+
+def test_panel_rect_stays_inside_window_and_covers_feet(pet: PetWindow) -> None:
+    pet.set_glass(True, 14)
+    rect = pet.panel_rect()
+    assert rect.left() >= 0
+    assert rect.top() >= 0
+    assert rect.right() <= pet.width()
+    assert rect.bottom() <= pet.height()
+    # 面板要包住头顶、下巴与脚底
+    assert rect.top() < TOP
+    assert rect.bottom() >= int(pet._content_bottom())
+    assert rect.contains(center_point(pet))
+
+
+def test_panel_grows_with_the_stick_body(pet: PetWindow) -> None:
+    pet.set_glass(True, 14)
+    with_body = pet.panel_rect()
+    pet.set_stick_body_enabled(False)
+    without_body = pet.panel_rect()
+    assert with_body.height() > without_body.height()
+
+
+def test_panel_hit_area_is_the_rectangle_not_the_rounded_shape(pet: PetWindow) -> None:
+    """拖拽热区按矩形算：圆角外侧的角点依然可点，不留「看得见点不动」的缝。"""
+    pet.set_glass(True, 24)
+    rect = pet.panel_rect()
+    corner = QPoint(rect.left() + 1, rect.top() + 1)
+    assert pet.hit_test(corner) is True
+    outside = QPoint(rect.left() - 3, rect.top())
+    assert pet.hit_test(outside) is False
+
+
+def test_glass_hits_respect_click_through(pet: PetWindow) -> None:
+    pet.set_glass(True, 14)
+    pet.set_click_through(True)
+    assert pet.hit_test(center_point(pet)) is False
+
+
+def test_glass_does_not_touch_window_flags(pet: PetWindow) -> None:
+    """点击功能与置顶优先：加面板不改窗口标志，也不抢焦点。"""
+    before = pet.windowFlags()
+    pet.set_glass(True, 14)
+    assert pet.windowFlags() == before
+    assert has_flag(pet.windowFlags(), Qt.WindowType.WindowStaysOnTopHint)
+    assert pet.windowType() == Qt.WindowType.Tool
+
+
+def test_panel_paints_translucent_surface_with_empty_corners(pet: PetWindow) -> None:
+    pet.set_glass(True, 24)
+    image = QImage(pet.size(), QImage.Format.Format_ARGB32)
+    image.fill(QColor(0, 0, 0, 0))
+    pet.render(image)
+    rect = pet.panel_rect()
+    edge = image.pixelColor(rect.left() + 1, rect.center().y())
+    assert edge.alpha() > 0
+    # 面板有颜色但不遮住人物：透明度介于全透明与不透明之间
+    assert edge.alpha() < 255
+    corner = image.pixelColor(rect.left(), rect.top())
+    assert corner.alpha() < 60

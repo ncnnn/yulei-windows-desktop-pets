@@ -33,6 +33,8 @@ def _build_stub_modules():
             self.hotkeys_enabled = True
             self.check_updates = True
             self.reduce_motion = False
+            self.glass_enabled = True
+            self.corner_radius = 14
             self.version = 2
             self._saved = []
             for key, value in kwargs.items():
@@ -138,6 +140,9 @@ class FakeWindow:
     def set_reduce_motion(self, value):
         self.reduce_motion = bool(value)
 
+    def apply_glass_plan(self, plan):
+        self.glass_plan = plan
+
 
 class FakeController:
     def __init__(self):
@@ -195,6 +200,7 @@ class FakeRuntime:
         }
         self.controller = FakeController()
         self.calls = []
+        self.glass = None
 
     def set_volume(self, value):
         self.volume = min(max(float(value), 0.0), 1.0)
@@ -210,6 +216,10 @@ class FakeRuntime:
     def set_pet_size(self, role, size):
         self.windows[role].set_pet_size(size)
         self.calls.append(("set_pet_size", role, size))
+
+    def set_glass(self, enabled, radius=None):
+        self.glass = (bool(enabled), int(radius if radius is not None else 14))
+        self.calls.append(("set_glass", *self.glass))
 
     def set_role_visible(self, role, visible):
         self.windows[role].setVisible(visible)
@@ -259,7 +269,7 @@ def test_tabs_and_core_widgets_exist(app):
     dialog = SettingsDialog(FakeRuntime(), Config())
 
     titles = [dialog._tabs.tabText(i) for i in range(dialog._tabs.count())]
-    assert titles == ["声音", "互动", "系统", "关于"]
+    assert titles == ["声音", "互动", "外观", "系统", "关于"]
 
     assert _slider(dialog, "volume") is not None
     assert _combo(dialog, "voice") is not None
@@ -284,7 +294,7 @@ def test_tabs_and_core_widgets_exist(app):
 def test_about_page_states_copyright(app):
     dialog = SettingsDialog(FakeRuntime(), Config())
     labels = " ".join(
-        label.text() for label in dialog._tabs.widget(3).findChildren(QLabel)
+        label.text() for label in dialog._tabs.widget(4).findChildren(QLabel)
     )
     assert "MIT" in COPYRIGHT_NOTICE
     assert "原作者" in COPYRIGHT_NOTICE or "原权利人" in COPYRIGHT_NOTICE
@@ -428,3 +438,31 @@ def test_volume_hint_warns_below_battle_ladder(app):
     dialog._on_volume(60)
     assert "20%" in dialog.volume_hint.text()
     assert "低于 20%" not in dialog.volume_hint.text()
+
+
+def test_interaction_page_has_stage3_controls(app):
+    dialog = SettingsDialog(FakeRuntime(), Config())
+    assert _combo(dialog, "auto_dialog_chance") is not None
+    assert _combo(dialog, "auto_dialog_mode") is not None
+    assert _check(dialog, "duel_effect") is not None
+
+
+def test_appearance_page_has_glass_controls(app):
+    runtime = FakeRuntime()
+    config = Config()
+    dialog = SettingsDialog(runtime, config)
+
+    box = _check(dialog, "glass")
+    combo = _combo(dialog, "corner_radius")
+    assert box is not None
+    assert combo is not None
+    assert combo.count() >= 4
+
+    combo.setCurrentIndex(combo.findData(20))
+    assert config.corner_radius == 20
+    assert runtime.glass == (True, 20)
+
+    box.setChecked(False)
+    assert config.glass_enabled is False
+    assert runtime.glass == (False, 20)
+    assert config._saved

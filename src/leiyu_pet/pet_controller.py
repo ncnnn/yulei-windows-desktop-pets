@@ -58,6 +58,8 @@ class PetController(QObject):
     notice = Signal(str)
     #: 播放模式变化："idle"/"solo"/"pair"/"crosstalk"/"battle"，供托盘更新图标。
     mode_changed = Signal(str)
+    #: 一段「对话」开场（pair/crosstalk/battle），供决斗特效使用；独白不触发。
+    conversation_started = Signal(str)
 
     def __init__(
         self,
@@ -340,6 +342,7 @@ class PetController(QObject):
             ]
         self.dialogue.cancel()
         self._enter_mode("crosstalk")
+        self.conversation_started.emit("crosstalk")
         self._execute(self.crosstalk.start(commands))
         return True
 
@@ -365,6 +368,7 @@ class PetController(QObject):
             )
         self.dialogue.cancel()
         self._enter_mode("battle")
+        self.conversation_started.emit("battle")
         self._execute(self.crosstalk.start(staggered))
         return True
 
@@ -404,6 +408,7 @@ class PetController(QObject):
                 raise KeyError(f"不存在问答组 {pair_id}") from exc
         self.crosstalk.cancel()
         self._enter_mode("pair")
+        self.conversation_started.emit("pair")
         self._execute(self.dialogue.start(pair))
         for window in self.windows.values():
             nod = getattr(window, "nod", None)
@@ -438,10 +443,10 @@ class PetController(QObject):
         self._volume_overridden = False
 
     def set_status(self, role: Role, text: str) -> bool:
-        """常驻状态气泡（番茄钟倒计时等），不发声。
+        """常驻状态条（番茄钟倒计时等）。
 
-        正在播放台词时只记下文本、不抢字幕；这一句播完会自动补上。
-        返回是否已真正显示。
+        与对话气泡是两个独立控件，说话时不会互相覆盖——台词走气泡，倒计时
+        走底部状态条，可以同时显示。
         """
         message = text.strip()
         if not message:
@@ -451,32 +456,30 @@ class PetController(QObject):
             return False
         self._status_role = role
         self._status_text = message
-        if self._audio_is_playing():
-            return False
-        window.set_caption(message)
+        setter = getattr(window, "set_status_text", None)
+        if callable(setter):
+            setter(message)
         return True
 
     def clear_status(self) -> bool:
-        role, text = self._status_role, self._status_text
+        role = self._status_role
         self._status_role = None
         self._status_text = ""
         if role is None:
             return False
         window = self.windows.get(role)
-        if window is None or self._audio_is_playing():
-            return True
-        getter = getattr(window, "caption", None)
-        current = getter() if callable(getter) else getattr(window, "caption", "")
-        if current == text:
-            window.set_caption("")
+        setter = getattr(window, "set_status_text", None)
+        if window is not None and callable(setter):
+            setter("")
         return True
 
     def _reapply_status(self) -> None:
-        if self._status_role is None or self._audio_is_playing():
+        if self._status_role is None:
             return
         window = self.windows.get(self._status_role)
-        if window is not None and window.isVisible():
-            window.set_caption(self._status_text)
+        setter = getattr(window, "set_status_text", None)
+        if window is not None and callable(setter):
+            setter(self._status_text)
 
     def stop_all(self) -> None:
         self._generation += 1

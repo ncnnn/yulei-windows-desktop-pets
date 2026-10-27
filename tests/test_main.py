@@ -12,6 +12,7 @@ class FakeWindow:
         self.locked: bool | None = None
         self.click_through: bool | None = None
         self.reduce_motion: bool | None = None
+        self.stick: dict[str, object] = {}
 
     def set_locked(self, value: bool) -> None:
         self.locked = value
@@ -21,6 +22,24 @@ class FakeWindow:
 
     def set_reduce_motion(self, value: bool) -> None:
         self.reduce_motion = value
+
+    def set_stick_body_ratio(self, value: float) -> None:
+        self.stick["ratio"] = value
+
+    def set_stick_line_width(self, value: float) -> None:
+        self.stick["line_width"] = value
+
+    def set_stick_neck_overlap(self, value: float) -> None:
+        self.stick["neck_overlap"] = value
+
+    def set_stick_color(self, value: str) -> None:
+        self.stick["color"] = value
+
+    def set_stick_spin_axis(self, value: str) -> None:
+        self.stick["axis"] = value
+
+    def set_stick_body_enabled(self, value: bool) -> None:
+        self.stick["enabled"] = value
 
 
 class FakeController:
@@ -69,6 +88,10 @@ class FakeRuntime:
         self.caption_font_size: int | None = None
         self.always_on_top: bool | None = None
         self.wander: tuple[bool, int] | None = None
+        self.stick_actions: tuple[bool, int] | None = None
+        self.auto_dialog: tuple[int, str] | None = None
+        self.duel_effect: bool | None = None
+        self.glass: tuple[bool, int] | None = None
         self.windows = {"lei": FakeWindow(), "yu": FakeWindow()}
         self.controller = FakeController()
         self.assistant = FakeAssistant()
@@ -87,6 +110,18 @@ class FakeRuntime:
 
     def set_rate(self, rate: float) -> None:
         self.rate = rate
+
+    def set_stick_action_settings(self, enabled: bool, interval: int) -> None:
+        self.stick_actions = (enabled, interval)
+
+    def set_auto_dialog(self, chance: int, mode: str) -> None:
+        self.auto_dialog = (chance, mode)
+
+    def set_duel_effect_enabled(self, enabled: bool) -> None:
+        self.duel_effect = enabled
+
+    def set_glass(self, enabled: bool, radius: int | None = None) -> None:
+        self.glass = (bool(enabled), int(radius if radius is not None else 14))
 
     def set_opacity(self, value: float) -> None:
         self.opacity = value
@@ -161,6 +196,26 @@ def test_apply_config_propagates_to_runtime_and_windows() -> None:
     assert runtime.wander == (cfg.wander_enabled, cfg.wander_interval_seconds)
     assert runtime.controller.calls["overlap_easter_egg"] is cfg.overlap_easter_egg
     assert runtime.controller.calls["overlap_trigger_gap"] == cfg.overlap_trigger_gap
+
+    assert runtime.windows["lei"].stick == {
+        "ratio": cfg.stick_body_ratio,
+        "line_width": cfg.stick_line_width,
+        "neck_overlap": cfg.stick_neck_overlap,
+        "color": cfg.stick_color_lei,
+        "axis": cfg.stick_spin_axis,
+        "enabled": cfg.stick_body_enabled,
+    }
+    assert runtime.windows["yu"].stick["color"] == cfg.stick_color_yu
+    assert runtime.stick_actions == (
+        cfg.stick_random_action_enabled,
+        cfg.stick_action_interval,
+    )
+    assert runtime.auto_dialog == (
+        cfg.auto_move_dialog_chance,
+        cfg.auto_move_dialog_mode,
+    )
+    assert runtime.duel_effect is cfg.duel_effect_enabled
+    assert runtime.glass == (cfg.glass_enabled, cfg.corner_radius)
     assert runtime.assistant.config["hourly"] is cfg.hourly_chime
     assert runtime.assistant.quiet is not None
 
@@ -213,3 +268,27 @@ def test_resolve_pack_reports_validation_error(
     problems: list[str] = []
     assert entry.resolve_pack(problems) is None
     assert problems, "素材损坏时应记录失败原因"
+
+
+def test_migrate_legacy_positions_converts_top_left() -> None:
+    cfg = Config()
+    cfg.version = 3
+    cfg.lei_size = 220
+    cfg.yu_size = 220
+    cfg.lei_pos = [100, 200]
+    cfg.yu_pos = [400, 500]
+
+    assert entry.migrate_legacy_positions(cfg) is True
+
+    assert cfg.version == 4
+    assert cfg.lei_pos == [100 + 158, 200 + 348]
+    assert cfg.yu_pos == [400 + 158, 500 + 348]
+
+
+def test_migrate_skips_current_schema() -> None:
+    cfg = Config()
+    cfg.version = 4
+    cfg.lei_pos = [500, 900]
+
+    assert entry.migrate_legacy_positions(cfg) is False
+    assert cfg.lei_pos == [500, 900]

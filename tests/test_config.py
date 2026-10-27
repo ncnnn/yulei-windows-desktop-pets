@@ -131,3 +131,77 @@ def test_opacity_lower_bound(tmp_path: Path) -> None:
     path = tmp_path / "config.json"
     path.write_text(json.dumps({"opacity": 0.0}), encoding="utf-8")
     assert load_config(path).opacity == 0.3
+
+
+def test_stick_defaults_are_enabled() -> None:
+    config = Config()
+    assert config.stick_body_enabled is True
+    assert config.stick_random_action_enabled is True
+    assert config.stick_spin_axis == "flip"
+    assert config.version == 4
+
+
+def test_stick_values_are_clamped_and_validated(tmp_path: Path) -> None:
+    path = tmp_path / "config.json"
+    path.write_text(
+        json.dumps(
+            {
+                "stick_body_ratio": 9,
+                "stick_line_width": 0,
+                "stick_action_interval": 3,
+                "stick_spin_axis": "nope",
+                "stick_color_lei": "red",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_config(path)
+
+    assert config.stick_body_ratio == 1.4
+    assert config.stick_line_width == 2.0
+    assert config.stick_action_interval == 8
+    assert config.stick_spin_axis == "flip"
+    assert config.stick_color_lei == "#20242b"
+
+
+def test_zero_interval_disables_random_actions(tmp_path: Path) -> None:
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"stick_action_interval": 0}), encoding="utf-8")
+    assert load_config(path).stick_action_interval == 0
+
+
+def test_auto_dialog_and_duel_defaults() -> None:
+    config = Config()
+    assert config.auto_move_dialog_chance == 0
+    assert config.auto_move_dialog_mode == "crosstalk"
+    assert config.duel_effect_enabled is True
+
+
+def test_auto_dialog_values_are_validated(tmp_path: Path) -> None:
+    path = tmp_path / "config.json"
+    path.write_text(
+        json.dumps({"auto_move_dialog_chance": 250, "auto_move_dialog_mode": "nope"}),
+        encoding="utf-8",
+    )
+    config = load_config(path)
+    assert config.auto_move_dialog_chance == 100
+    assert config.auto_move_dialog_mode == "crosstalk"
+
+
+def test_corner_radius_is_clamped(tmp_path: Path) -> None:
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"corner_radius": 999}), encoding="utf-8")
+    assert load_config(path).corner_radius == 28
+    path.write_text(json.dumps({"corner_radius": -4}), encoding="utf-8")
+    assert load_config(path).corner_radius == 0
+    path.write_text(json.dumps({"corner_radius": "12"}), encoding="utf-8")
+    assert load_config(path).corner_radius == 12
+
+
+def test_glass_defaults_are_on(tmp_path: Path) -> None:
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({}), encoding="utf-8")
+    cfg = load_config(path)
+    assert cfg.glass_enabled is True
+    assert cfg.corner_radius == 14

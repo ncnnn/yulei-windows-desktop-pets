@@ -321,6 +321,38 @@ class TrayManager(QObject):
             pass_checked=True,
             checked=bool(getattr(self.config, "overlap_easter_egg", False)),
         )
+        self._add_action(
+            self._menu,
+            "火柴人躯体",
+            self._toggle_stick_body,
+            checkable=True,
+            pass_checked=True,
+            checked=bool(getattr(self.config, "stick_body_enabled", True)),
+        )
+        self._add_action(
+            self._menu,
+            "随机动作（招手/跳舞）",
+            self._toggle_stick_random,
+            checkable=True,
+            pass_checked=True,
+            checked=bool(getattr(self.config, "stick_random_action_enabled", True)),
+        )
+        self._add_action(
+            self._menu,
+            "对话开场决斗特效",
+            self._toggle_duel_effect,
+            checkable=True,
+            pass_checked=True,
+            checked=bool(getattr(self.config, "duel_effect_enabled", True)),
+        )
+        self._add_action(
+            self._menu,
+            "半透明磨砂面板",
+            self._toggle_glass,
+            checkable=True,
+            pass_checked=True,
+            checked=bool(getattr(self.config, "glass_enabled", True)),
+        )
         self._menu.addSeparator()
 
         self._add_action(
@@ -416,6 +448,28 @@ class TrayManager(QObject):
         self.config.overlap_easter_egg = bool(checked)
         save_config(self.config, config_path())
         self.runtime.controller.set_overlap_easter_egg(bool(checked))
+
+    def _toggle_stick_body(self, checked: bool) -> None:
+        self.config.stick_body_enabled = bool(checked)
+        self.runtime.set_stick_body_enabled(bool(checked))
+
+    def _toggle_duel_effect(self, checked: bool) -> None:
+        self.config.duel_effect_enabled = bool(checked)
+        self.runtime.set_duel_effect_enabled(bool(checked))
+
+    def _toggle_glass(self, checked: bool) -> None:
+        self.config.glass_enabled = bool(checked)
+        self.runtime.set_glass(
+            bool(checked),
+            int(getattr(self.config, "corner_radius", 14)),
+        )
+
+    def _toggle_stick_random(self, checked: bool) -> None:
+        self.config.stick_random_action_enabled = bool(checked)
+        self.runtime.set_stick_action_settings(
+            bool(checked),
+            int(getattr(self.config, "stick_action_interval", 12)),
+        )
 
     def _toggle_autostart(self, checked: bool) -> None:
         try:

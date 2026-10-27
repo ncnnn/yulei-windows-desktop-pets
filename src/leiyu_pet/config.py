@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 DEFAULTS: dict[str, object] = {
-    "version": 3,
+    "version": 4,
     "volume": 0.65,
     "distance": 32,
     "tilt_enabled": True,
@@ -58,12 +58,31 @@ DEFAULTS: dict[str, object] = {
     "overlap_easter_egg": False,
     # 两只脸部间隙小于该像素值即视为「靠在一起」，触发自动互喷。
     "overlap_trigger_gap": 24.0,
+    # 火柴人躯体
+    "stick_body_enabled": True,
+    "stick_random_action_enabled": True,
+    "stick_body_ratio": 0.85,
+    "stick_line_width": 5.0,
+    "stick_neck_overlap": 6.0,
+    "stick_color_lei": "#20242b",
+    "stick_color_yu": "#2a2430",
+    "stick_action_interval": 12,
+    # 自转轴向：flip = Y 轴翻转（默认），roll = 旧版平面滚转
+    "stick_spin_axis": "flip",
+    # 自动移动后按概率发起对话
+    "auto_move_dialog_chance": 0,
+    "auto_move_dialog_mode": "crosstalk",
+    # 对话开场的决斗特效（纯视觉，与决战模式无关）
+    "duel_effect_enabled": True,
+    # 半透明磨砂面板与圆角半径
+    "glass_enabled": True,
+    "corner_radius": 14,
 }
 
 
 @dataclass(slots=True)
 class Config:
-    version: int = 3
+    version: int = 4
     volume: float = 0.65
     distance: int = 32
     tilt_enabled: bool = True
@@ -98,6 +117,20 @@ class Config:
     wander_interval_seconds: int = 45
     overlap_easter_egg: bool = False
     overlap_trigger_gap: float = 24.0
+    stick_body_enabled: bool = True
+    stick_random_action_enabled: bool = True
+    stick_body_ratio: float = 0.85
+    stick_line_width: float = 5.0
+    stick_neck_overlap: float = 6.0
+    stick_color_lei: str = "#20242b"
+    stick_color_yu: str = "#2a2430"
+    stick_action_interval: int = 12
+    stick_spin_axis: str = "flip"
+    auto_move_dialog_chance: int = 0
+    auto_move_dialog_mode: str = "crosstalk"
+    duel_effect_enabled: bool = True
+    glass_enabled: bool = True
+    corner_radius: int = 14
 
 
 def _defaults() -> dict[str, object]:
@@ -142,6 +175,13 @@ def _coerce(key: str, value: object) -> object:
             return min(max(number, 1), 60)
         if key == "wander_interval_seconds":
             return min(max(number, 10), 600)
+        if key == "auto_move_dialog_chance":
+            return min(max(number, 0), 100)
+        if key == "corner_radius":
+            return min(max(number, 0), 28)
+        if key == "stick_action_interval":
+            # 0 表示不随机动；其余至少 8 秒，避免一直手舞足蹈。
+            return 0 if number <= 0 else min(max(number, 8), 600)
         return number
     if isinstance(default, float):
         try:
@@ -156,6 +196,12 @@ def _coerce(key: str, value: object) -> object:
             return min(max(number, 0.3), 1.0)
         if key == "overlap_trigger_gap":
             return min(max(number, 0.0), 200.0)
+        if key == "stick_body_ratio":
+            return min(max(number, 0.4), 1.4)
+        if key == "stick_line_width":
+            return min(max(number, 2.0), 12.0)
+        if key == "stick_neck_overlap":
+            return min(max(number, 0.0), 40.0)
         return number
     if isinstance(default, str):
         if key in {"quiet_start", "quiet_end"}:
@@ -163,6 +209,13 @@ def _coerce(key: str, value: object) -> object:
 
             text = value if isinstance(value, str) else ""
             return normalize_hhmm(text, str(default))
+        if key == "stick_spin_axis":
+            return value if value in {"flip", "roll"} else default
+        if key == "auto_move_dialog_mode":
+            return value if value in {"crosstalk", "battle", "random"} else default
+        if key in {"stick_color_lei", "stick_color_yu"}:
+            text = value if isinstance(value, str) else ""
+            return text if text.startswith("#") and len(text) in {4, 7, 9} else default
         return value
     return value
 
