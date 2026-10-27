@@ -82,17 +82,35 @@ jobs:
             "LeiYu-Desktop-Pets-Windows-$version-x64-portable.zip",
             "SHA256SUMS.txt"
           )
-          gh release create $tag $assets --title "v$version" --notes @"
-          Windows 10/11 x64 雷余双桌宠。
 
-          - 安装版：LeiYu-Desktop-Pets-Windows-v$version-x64-setup.exe
-          - 便携版：LeiYu-Desktop-Pets-Windows-$version-x64-portable.zip（解压即用）
-          - 校验：SHA256SUMS.txt
-          - 更新记录：CHANGELOG.md
+          # 从 CHANGELOG 抽取本版本的「新增/修复」正文，直接作为发布说明。
+          $changelog = Get-Content CHANGELOG.md -Raw -Encoding UTF8
+          $pattern = '(?ms)^##[ \t]+v' + [regex]::Escape($version) + '[ \t]*\r?\n(.*?)(?=^##[ \t]+v|\z)'
+          $sectionMatch = [regex]::Match($changelog, $pattern)
+          $section = if ($sectionMatch.Success) {
+            $sectionMatch.Groups[1].Value.Trim()
+          } else {
+            "详细变更见 CHANGELOG.md。"
+          }
 
-          素材版权：随包头像与音频不在 MIT 许可范围内，版权归原权利人所有；本项目仅用于学习交流与玩梗，不用于商业用途；权利人如认为使用不当，可在仓库开 issue，我们会及时移除。
+          $notes = @"
+          $section
 
-          安装包未做代码签名，Windows SmartScreen 可能提示，请选择“仍要运行”。
+          ---
+
+          **下载**
+
+          - 安装版：`LeiYu-Desktop-Pets-Windows-v$version-x64-setup.exe`（装到 `%LOCALAPPDATA%\Programs\LeiYuDesktopPets`，无需管理员权限）
+          - 便携版：`LeiYu-Desktop-Pets-Windows-$version-x64-portable.zip`（解压即用，数据写在同目录 `data\`）
+          - 校验：`SHA256SUMS.txt`
+
+          **素材版权**：随包头像与音频不在 MIT 许可范围内，版权归原权利人所有；本项目仅用于学习交流与玩梗，不用于商业用途；权利人如认为使用不当，可在仓库开 issue，我们会及时移除。
+
+          **安装包未做代码签名**，Windows SmartScreen 可能提示，请选择“更多信息 → 仍要运行”。
 
           **免安装版如双击没反应**：压缩包从网络下载后 Windows 会写入「锁定」标记，请右键 `leiyu_pet.exe` → 属性 → 常规 → 勾选「解除锁定」→ 应用，再运行。
           "@
+
+          $notesPath = Join-Path $PWD "RELEASE_NOTES.md"
+          [IO.File]::WriteAllText($notesPath, $notes, (New-Object System.Text.UTF8Encoding($false)))
+          gh release create $tag $assets --title "v$version" --notes-file $notesPath

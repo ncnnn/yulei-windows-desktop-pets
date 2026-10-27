@@ -23,6 +23,13 @@ VOICE_LABELS = {"normal": "原声", "helium": "1.5倍氦气版"}
 VOLUMES = (0, 25, 50, 65, 80, 100)
 PLAYBACK_RATES = (0.8, 1.0, 1.25)
 RATE_LABELS = {0.8: "慢放 0.8×", 1.0: "常速 1.0×", 1.25: "快放 1.25×"}
+#: 托盘悬浮提示里显示的播放模式。
+MODE_LABELS = {
+    "crosstalk": "相声中",
+    "battle": "决战中",
+    "pair": "对话中",
+    "solo": "播放中",
+}
 
 
 class TrayManager(QObject):
@@ -53,6 +60,10 @@ class TrayManager(QObject):
         self._submenus: list[QMenu] = []
 
         self._tray.activated.connect(self._on_activated)
+        # 播放模式变化时更新悬浮提示（决战/相声中一眼可见）。
+        mode_signal = getattr(getattr(runtime, "controller", None), "mode_changed", None)
+        if mode_signal is not None:
+            mode_signal.connect(self._on_mode_changed)
 
     def show(self) -> None:
         self.build_menu()
@@ -169,7 +180,12 @@ class TrayManager(QObject):
 
         crosstalk_menu = self._menu.addMenu("相声模式")
         self._submenus.append(crosstalk_menu)
-        self._add_action(crosstalk_menu, "开始（两只交替连续说）", self._start_crosstalk)
+        self._add_action(crosstalk_menu, "开始（一问一答交替说）", self._start_crosstalk)
+        self._add_action(
+            crosstalk_menu,
+            "决战模式（每句音量 20%→70%）",
+            self._start_battle,
+        )
         crosstalk_menu.addSeparator()
         self._add_radio_group(
             crosstalk_menu,
@@ -299,7 +315,7 @@ class TrayManager(QObject):
         )
         self._add_action(
             self._menu,
-            "重叠时自动对喷",
+            "重叠时自动互喷",
             self._toggle_overlap,
             checkable=True,
             pass_checked=True,
@@ -336,6 +352,13 @@ class TrayManager(QObject):
             return
         self.runtime.show_all()
         self.runtime.controller.start_crosstalk()
+
+    def _start_battle(self) -> None:
+        """决战模式和相声同一套问答节奏，只是音量逐句爬升。"""
+        if self.runtime.controller.start_battle():
+            return
+        self.runtime.show_all()
+        self.runtime.controller.start_battle()
 
     def _set_crosstalk_lines(self, lines: int) -> None:
         self.runtime.controller.set_crosstalk_lines(lines)
@@ -406,6 +429,10 @@ class TrayManager(QObject):
             checked = False
         self.config.autostart = checked
         save_config(self.config, config_path())
+
+    def _on_mode_changed(self, mode: str) -> None:
+        label = MODE_LABELS.get(mode)
+        self._tray.setToolTip(f"雷余双桌宠 · {label}" if label else "雷余双桌宠")
 
     def _on_activated(self, reason) -> None:
         if reason == QSystemTrayIcon.ActivationReason.DoubleClick:

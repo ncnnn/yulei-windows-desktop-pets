@@ -417,3 +417,14 @@ def test_lock_checkbox_applies_and_saves(app):
     assert config.lock_position is True
     assert runtime.windows["lei"].locked is True
     assert config._saved
+
+
+def test_volume_hint_warns_below_battle_ladder(app):
+    dialog = SettingsDialog(FakeRuntime(), Config())
+
+    dialog._on_volume(10)
+    assert "低于 20%" in dialog.volume_hint.text()
+
+    dialog._on_volume(60)
+    assert "20%" in dialog.volume_hint.text()
+    assert "低于 20%" not in dialog.volume_hint.text()

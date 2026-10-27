@@ -56,6 +56,8 @@ DEFAULTS: dict[str, object] = {
     "wander_enabled": False,
     "wander_interval_seconds": 45,
     "overlap_easter_egg": False,
+    # 两只脸部间隙小于该像素值即视为「靠在一起」，触发自动互喷。
+    "overlap_trigger_gap": 24.0,
 }
 
 
@@ -95,6 +97,7 @@ class Config:
     wander_enabled: bool = False
     wander_interval_seconds: int = 45
     overlap_easter_egg: bool = False
+    overlap_trigger_gap: float = 24.0
 
 
 def _defaults() -> dict[str, object]:
@@ -151,6 +154,8 @@ def _coerce(key: str, value: object) -> object:
             return min(max(number, 0.5), 2.0)
         if key == "opacity":
             return min(max(number, 0.3), 1.0)
+        if key == "overlap_trigger_gap":
+            return min(max(number, 0.0), 200.0)
         return number
     if isinstance(default, str):
         if key in {"quiet_start", "quiet_end"}:

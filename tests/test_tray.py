@@ -428,7 +428,7 @@ def test_crosstalk_menu_starts_and_sets_lines(app):
 
     crosstalk_menu = _submenu(tray, "相声模式")
     _action(crosstalk_menu, "8 句").trigger()
-    _action(crosstalk_menu, "开始（两只交替连续说）").trigger()
+    _action(crosstalk_menu, "开始（一问一答交替说）").trigger()
 
     assert ("set_crosstalk_lines", 8) in runtime.controller.calls
     assert config.crosstalk_lines == 8
@@ -450,7 +450,7 @@ def test_crosstalk_starts_after_showing_all(app):
     tray = TrayManager(runtime, Config())
     tray.build_menu()
 
-    _action(_submenu(tray, "相声模式"), "开始（两只交替连续说）").trigger()
+    _action(_submenu(tray, "相声模式"), "开始（一问一答交替说）").trigger()
 
     assert attempts == [False, True]
     assert ("show_all",) in runtime.calls

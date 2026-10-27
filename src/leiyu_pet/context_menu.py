@@ -33,7 +33,8 @@ class ContextMenuManager(QObject):
         pair_action = self._add_action(menu, "两人对话一句", self.runtime.controller.start_pair)
         pair_action.setEnabled(self.runtime.controller.update_proximity())
         lines = self.runtime.controller.crosstalk_lines
-        self._add_action(menu, f"相声模式（交替 {lines} 句）", self._start_crosstalk)
+        self._add_action(menu, f"相声模式（一问一答 {lines} 句）", self._start_crosstalk)
+        self._add_action(menu, "决战模式（音量 20%→70%）", self._start_battle)
 
         pick_menu = menu.addMenu("挑一段")
         for clip in self.runtime.pack.clips_for(
@@ -102,8 +103,8 @@ class ContextMenuManager(QObject):
 
         overlap_action = self._add_action(
             menu,
-            "重叠时自动对喷",
-            self.runtime.controller.set_overlap_easter_egg,
+            "重叠时自动互喷",
+            self.runtime.set_overlap_easter_egg,
             checkable=True,
             pass_checked=True,
         )
@@ -133,6 +134,12 @@ class ContextMenuManager(QObject):
             return
         self.runtime.show_all()
         self.runtime.controller.start_crosstalk()
+
+    def _start_battle(self) -> None:
+        if self.runtime.controller.start_battle():
+            return
+        self.runtime.show_all()
+        self.runtime.controller.start_battle()
 
     def _start_pomodoro(self) -> None:
         assistant = getattr(self.runtime, "assistant", None)

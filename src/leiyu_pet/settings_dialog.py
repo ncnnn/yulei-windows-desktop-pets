@@ -81,6 +81,12 @@ class SettingsDialog(QDialog):
         self.volume_slider.valueChanged.connect(self._on_volume)
         form.addRow("音量", self.volume_slider)
 
+        self.volume_hint = QLabel("")
+        self.volume_hint.setObjectName("volume_hint")
+        self.volume_hint.setWordWrap(True)
+        form.addRow(self.volume_hint)
+        self._refresh_volume_hint(round(self.runtime.volume * 100))
+
         self.voice_combo = QComboBox()
         self.voice_combo.setObjectName("voice")
         self.voice_combo.addItem("原声", "normal")
@@ -385,7 +391,18 @@ class SettingsDialog(QDialog):
     def _on_volume(self, value: int) -> None:
         self.runtime.set_volume(value / 100)
         self.config.volume = max(0.0, min(value / 100, 1.0))
+        self._refresh_volume_hint(value)
         self._persist()
+
+    def _refresh_volume_hint(self, percent: int) -> None:
+        """音量低于 20% 时，决战模式的 20%→70% 阶梯会被压平，需要说明。"""
+        if percent < 20:
+            self.volume_hint.setText(
+                "⚠ 当前音量低于 20%：决战模式每句都会按当前音量播放，"
+                "听不出 20%→70% 的阶梯。"
+            )
+        else:
+            self.volume_hint.setText("决战模式会在这个音量以下逐句从 20% 升到 70%。")
 
     def _set_voice(self, mode: str) -> None:
         self.runtime.controller.set_voice_mode(mode)

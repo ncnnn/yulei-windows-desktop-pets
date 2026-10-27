@@ -42,6 +42,9 @@ class FakeController:
     def set_overlap_easter_egg(self, value: bool) -> None:
         self.calls["overlap_easter_egg"] = value
 
+    def set_overlap_trigger_gap(self, value: float) -> None:
+        self.calls["overlap_trigger_gap"] = value
+
 
 class FakeAssistant:
     def __init__(self) -> None:
@@ -157,6 +160,7 @@ def test_apply_config_propagates_to_runtime_and_windows() -> None:
     assert runtime.always_on_top is cfg.always_on_top
     assert runtime.wander == (cfg.wander_enabled, cfg.wander_interval_seconds)
     assert runtime.controller.calls["overlap_easter_egg"] is cfg.overlap_easter_egg
+    assert runtime.controller.calls["overlap_trigger_gap"] == cfg.overlap_trigger_gap
     assert runtime.assistant.config["hourly"] is cfg.hourly_chime
     assert runtime.assistant.quiet is not None
 

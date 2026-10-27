@@ -297,3 +297,155 @@ def test_pair_dialogue_nods_both_pets(asset_pack_factory) -> None:
     controller.start_pair(1)
     assert windows["lei"].nodded == 1
     assert windows["yu"].nodded == 1
+
+
+def test_overlap_triggers_when_heads_just_touch(asset_pack_factory) -> None:
+    """用户理解的「拖到一起」是贴边（间隙 0），旧实现要求面积重叠 55% 才响。"""
+    controller, windows, audio = build_controller(asset_pack_factory)
+    windows["lei"].rect = Rect(0, 0, 100, 100)
+    windows["yu"].rect = Rect(100, 0, 100, 100)  # 紧贴，间隙 0，面积重叠 0
+    controller.set_overlap_easter_egg(True)
+
+    controller.update_proximity()
+
+    assert audio.calls and audio.calls[0][0] == "lei"
+
+
+def test_overlap_ignores_pets_that_are_apart(asset_pack_factory) -> None:
+    controller, windows, audio = build_controller(asset_pack_factory)
+    windows["lei"].rect = Rect(0, 0, 100, 100)
+    windows["yu"].rect = Rect(400, 0, 100, 100)
+    controller.set_overlap_easter_egg(True)
+
+    controller.update_proximity()
+
+    assert audio.calls == []
+
+
+def test_overlap_gap_threshold_is_configurable(asset_pack_factory) -> None:
+    controller, windows, audio = build_controller(asset_pack_factory)
+    windows["lei"].rect = Rect(0, 0, 100, 100)
+    windows["yu"].rect = Rect(130, 0, 100, 100)  # 间隙 30
+    controller.set_overlap_easter_egg(True)
+    controller.set_overlap_trigger_gap(0)
+
+    controller.update_proximity()
+    assert audio.calls == []
+
+    controller.set_overlap_trigger_gap(40)
+    controller.update_proximity()
+    assert audio.calls and audio.calls[0][0] == "lei"
+
+
+def test_overlap_cooldown_is_not_consumed_on_failure(asset_pack_factory) -> None:
+    """被隐藏等原因拒绝时不能白烧冷却，否则用户会看到 12 秒死区。"""
+    controller, windows, audio = build_controller(asset_pack_factory)
+    windows["lei"].rect = Rect(0, 0, 100, 100)
+    windows["yu"].rect = Rect(100, 0, 100, 100)
+    controller.set_overlap_easter_egg(True)
+    windows["yu"].visible = False
+
+    controller.update_proximity()
+    assert audio.calls == []
+    assert controller._last_overlap_at == 0.0
+
+    windows["yu"].visible = True
+    controller.update_proximity()
+    assert audio.calls and audio.calls[0][0] == "lei"
+
+
+def test_battle_rises_volume_and_restores(asset_pack_factory) -> None:
+    controller, _windows, audio = build_controller(asset_pack_factory)
+    volumes: list[float] = []
+    audio.set_volume = volumes.append  # type: ignore[method-assign]
+    controller.set_volume(1.0)
+    volumes.clear()
+
+    assert controller.start_battle(4) is True
+    assert controller.mode == "battle"
+    assert volumes == [0.2]
+
+    for _ in range(4):
+        role, clip_id, _path = audio.calls[-1]
+        audio.is_playing = False
+        audio.finished.emit(role, clip_id)
+
+    assert volumes == [0.2, 0.367, 0.533, 0.7, 1.0]
+    assert controller.mode == "idle"
+
+
+def test_battle_never_exceeds_user_volume(asset_pack_factory) -> None:
+    controller, _windows, audio = build_controller(asset_pack_factory)
+    volumes: list[float] = []
+    audio.set_volume = volumes.append  # type: ignore[method-assign]
+    controller.set_volume(0.3)
+    volumes.clear()
+    notices: list[str] = []
+    controller.notice.connect(notices.append)
+
+    controller.start_battle(4)
+
+    assert volumes == [0.2]
+    role, clip_id, _path = audio.calls[-1]
+    audio.is_playing = False
+    audio.finished.emit(role, clip_id)
+    assert volumes[-1] == 0.3
+    assert notices == []  # 30% ≥ 20%，无需提示
+
+
+def test_battle_hints_when_volume_below_ladder(asset_pack_factory) -> None:
+    controller, _windows, audio = build_controller(asset_pack_factory)
+    notices: list[str] = []
+    controller.notice.connect(notices.append)
+    controller.set_volume(0.1)
+
+    controller.start_battle(4)
+
+    assert notices and "20%" in notices[0]
+
+
+def test_battle_and_crosstalk_are_mutually_exclusive(asset_pack_factory) -> None:
+    controller, _windows, audio = build_controller(asset_pack_factory)
+    controller.set_volume(1.0)
+
+    assert controller.start_crosstalk(4) is True
+    assert controller.mode == "crosstalk"
+
+    assert controller.start_battle(4) is True
+    assert controller.mode == "battle"
+    assert controller.crosstalk.position == 1  # 序列已换成决战的新序列
+
+
+def test_crosstalk_uses_paired_questions_and_answers(asset_pack_factory) -> None:
+    """角色交替之外，内容也必须成对：lei 问 1，yu 就答 2。"""
+    controller, _windows, audio = build_controller(asset_pack_factory)
+    controller.set_crosstalk_lines(4)
+
+    assert controller.start_crosstalk() is True
+    assert [call[1] for call in audio.calls] == [1]
+
+    role, clip_id, _path = audio.calls[-1]
+    audio.finished.emit(role, clip_id)
+    assert [call[1] for call in audio.calls] == [1, 2]
+    assert audio.calls[-1][0] == "yu"
+
+    role, clip_id, _path = audio.calls[-1]
+    audio.finished.emit(role, clip_id)
+    assert [call[1] for call in audio.calls] == [1, 2, 3]
+
+
+def test_status_bubble_yields_to_speech_then_returns(asset_pack_factory) -> None:
+    controller, windows, audio = build_controller(asset_pack_factory)
+    assert controller.set_status("lei", "番茄钟 24:00") is True
+    assert windows["lei"].caption == "番茄钟 24:00"
+
+    controller.play_solo("lei", 1)
+    assert controller.set_status("lei", "番茄钟 23:59") is False
+
+    role, clip_id, _path = audio.calls[-1]
+    audio.is_playing = False
+    audio.finished.emit(role, clip_id)
+    assert windows["lei"].caption == "番茄钟 23:59"
+
+    assert controller.clear_status() is True
+    assert windows["lei"].caption == ""

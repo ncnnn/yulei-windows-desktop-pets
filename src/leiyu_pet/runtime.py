@@ -38,6 +38,7 @@ class PetRuntime(QObject):
         self.menu_manager = ContextMenuManager(self)
         #: 整点/久坐/番茄钟的统一入口。
         self.assistant = PetAssistant(parent=self)
+        self.assistant.countdown.connect(self._on_countdown)
         #: 由主程序注入：右键菜单「设置…」的入口。
         self.on_open_settings = None
         #: 由主程序注入：用于把尺寸/速度等改动写回配置。
@@ -183,6 +184,19 @@ class PetRuntime(QObject):
 
     def set_distance(self, distance: float) -> None:
         self.controller.set_distance(distance)
+
+    def set_overlap_easter_egg(self, enabled: bool) -> None:
+        """重叠自动互喷开关：同步控制器并落盘（右键/托盘/设置页共用）。"""
+        self.controller.set_overlap_easter_egg(bool(enabled))
+        self._persist_setting("overlap_easter_egg", bool(enabled))
+
+    def _on_countdown(self, text: str) -> None:
+        """番茄钟每秒刷新常驻气泡；正在说话时由控制器自动让位、说完补上。"""
+        if not text:
+            self.controller.clear_status()
+            return
+        role: Role = "lei" if self.windows["lei"].isVisible() else "yu"
+        self.controller.set_status(role, f"番茄钟 · {text}")
 
     def set_pet_size(self, role: Role, size: int) -> None:
         """调整人物大小，并立即写回配置（重启后不再丢失）。"""

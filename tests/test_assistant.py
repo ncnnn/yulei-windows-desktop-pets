@@ -66,3 +66,37 @@ def test_pomodoro_transition_emits_notice(qapp) -> None:
         assert assistant.pomodoro_active is False
     finally:
         assistant.stop_polling()
+
+
+def test_pomodoro_countdown_emits_status_each_tick(qapp) -> None:
+    assistant = PetAssistant()
+    texts: list[str] = []
+    assistant.countdown.connect(texts.append)
+    try:
+        assert assistant.start_pomodoro() is True
+        assert texts and texts[-1].startswith("专注中")
+
+        assistant._emit_countdown()
+        assert texts[-1].startswith("专注中")
+
+        assistant.stop_pomodoro()
+        assert texts[-1] == ""
+    finally:
+        assistant.stop_polling()
+
+
+def test_countdown_clears_when_pomodoro_finishes(qapp) -> None:
+    assistant = PetAssistant()
+    assistant.configure(hourly=False, break_minutes=0, focus_minutes=25, rest_minutes=5)
+    texts: list[str] = []
+    assistant.countdown.connect(texts.append)
+    try:
+        assistant.pomodoro.start(at())
+        assistant.poll(at() + timedelta(minutes=25))
+        assert texts[-1].startswith("休息中")
+
+        assistant.poll(at() + timedelta(minutes=30))
+        assert texts[-1] == ""
+        assert assistant.pomodoro_active is False
+    finally:
+        assistant.stop_polling()
