@@ -395,8 +395,8 @@ def _degraded_plan(*_args, **_kwargs):
     return plan_frosted(enabled=True, acrylic_available=False)
 
 
-def test_context_menu_exposes_frosted_toggle_and_action_submenu(asset_pack_factory) -> None:
-    """菜单里要有磨砂开关与「让 TA 做个动作」的十二个动作。"""
+def test_context_menu_exposes_action_submenu(asset_pack_factory) -> None:
+    """菜单里要有「让 TA 做个动作」的十二个动作，同时保持精简。"""
     from leiyu_pet.stick_body import ACTION_LABELS, RANDOM_ACTIONS
 
     pack = load_asset_pack(asset_pack_factory())
@@ -404,7 +404,10 @@ def test_context_menu_exposes_frosted_toggle_and_action_submenu(asset_pack_facto
     try:
         menu = runtime.menu_manager.show("lei", QPoint(5, 5))
         texts = [action.text() for action in menu.actions()]
-        assert "磨砂菜单与设置" in texts
+        assert "相声模式 · 20 句" in texts
+        assert "决战模式 · 20 句" in texts
+        for legacy in ("最近说过", "两人对话一句", "磨砂菜单与设置", "歪头距离", "人物大小"):
+            assert legacy not in texts
         action_menu = next(
             sub for sub in menu.findChildren(QMenu) if sub.title() == "让 TA 做个动作"
         )

@@ -766,6 +766,15 @@ class PetWindow(QWidget):
         mapped = inverse.map(point)
         if not box.contains(mapped):
             return False
+        # 头像框的内切椭圆一律算实体。
+        # 逐像素 alpha 判定在真实素材上并不可靠：头像四周有透明留白、边缘是
+        # 半透明，缩放/动画偏移后采样点很容易落到 alpha=0 的位置，表现就是
+        # 「明明看着人头，却点不到、拖不动」。椭圆之外溢出的像素（耳朵、
+        # 发梢、装饰）再走 alpha 兜底。
+        dx = (mapped.x() - box.center().x()) / max(box.width() / 2.0, 1.0)
+        dy = (mapped.y() - box.center().y()) / max(box.height() / 2.0, 1.0)
+        if dx * dx + dy * dy <= 1.0:
+            return True
         if self._alpha is None:
             return True
         px = int((mapped.x() - box.left()) / box.width() * self._alpha.width())

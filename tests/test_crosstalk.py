@@ -131,10 +131,10 @@ def test_commands_from_pairs_is_deterministic_with_seeded_rng() -> None:
     assert first == second
 
 
-def test_battle_ladder_runs_from_55_to_100_percent() -> None:
-    """决战阶梯是「倍率」：首句 55% 起始，末句正好等于用户设定音量。
+def test_battle_ladder_runs_from_20_to_100_percent() -> None:
+    """决战阶梯是「倍率」：首句 20%，末句正好等于用户设定音量。
 
-    起点不能再往下压——旧的绝对 20% 乘以用户 65% 只有 13%，听上去就是没声。
+    倍率而不是绝对音量：绝对 20% 乘上用户 65% 的总音量只剩 13%，听上去就是没声。
     """
     ladder = battle_multipliers(3)
     assert ladder[0] == pytest.approx(BATTLE_START_VOLUME)
@@ -142,13 +142,12 @@ def test_battle_ladder_runs_from_55_to_100_percent() -> None:
     assert ladder == sorted(ladder)
     assert battle_multipliers(1) == [BATTLE_END_VOLUME]
 
-    for count in (2, 4, 6, 12):
+    for count in (2, 4, 6, 12, 20):
         values = battle_multipliers(count)
         assert len(values) == count
         assert all(BATTLE_START_VOLUME <= value <= BATTLE_END_VOLUME for value in values)
 
 
-def test_battle_first_line_is_audible_at_default_volume() -> None:
-    """默认 65% 音量下，第一句至少 35%，不能在笔记本喇叭上等于静音。"""
-    first = battle_multipliers(6)[0]
-    assert 0.65 * first >= 0.35
+def test_battle_last_line_reaches_the_user_volume() -> None:
+    """最后一句必须能到 100%，不能像旧版那样封顶 70%。"""
+    assert battle_multipliers(20)[-1] == pytest.approx(1.0)

@@ -320,28 +320,6 @@ class SettingsDialog(QDialog):
         form.addRow(self.explicit_check)
         layout.addWidget(playback)
 
-        display = QGroupBox("字幕与显示")
-        display_form = QFormLayout(display)
-
-        self.caption_size_slider = QSlider(Qt.Orientation.Horizontal)
-        self.caption_size_slider.setObjectName("caption_font_size")
-        self.caption_size_slider.setRange(9, 20)
-        self.caption_size_slider.setValue(int(getattr(self.config, "caption_font_size", 11)))
-        self.caption_size_slider.valueChanged.connect(self._on_caption_size)
-        display_form.addRow("字幕字号", self.caption_size_slider)
-
-        self.opacity_slider = QSlider(Qt.Orientation.Horizontal)
-        self.opacity_slider.setObjectName("opacity")
-        self.opacity_slider.setRange(30, 100)
-        self.opacity_slider.setValue(round(float(getattr(self.config, "opacity", 1.0)) * 100))
-        self.opacity_slider.valueChanged.connect(self._on_opacity)
-        display_form.addRow("窗口透明度", self.opacity_slider)
-
-        caption_hint = QLabel("字幕气泡与番茄钟胶囊都跟着这里放大；窗口透明度只影响人物层，不影响气泡可读性。")
-        caption_hint.setObjectName("section_hint")
-        caption_hint.setWordWrap(True)
-        display_form.addRow(caption_hint)
-        layout.addWidget(display)
         layout.addStretch(1)
         return page
 
@@ -505,6 +483,29 @@ class SettingsDialog(QDialog):
         page = QWidget()
         layout = QVBoxLayout(page)
 
+        display = QGroupBox("字幕与显示")
+        display_form = QFormLayout(display)
+
+        self.caption_size_slider = QSlider(Qt.Orientation.Horizontal)
+        self.caption_size_slider.setObjectName("caption_font_size")
+        self.caption_size_slider.setRange(9, 20)
+        self.caption_size_slider.setValue(int(getattr(self.config, "caption_font_size", 11)))
+        self.caption_size_slider.valueChanged.connect(self._on_caption_size)
+        display_form.addRow("字幕字号", self.caption_size_slider)
+
+        self.opacity_slider = QSlider(Qt.Orientation.Horizontal)
+        self.opacity_slider.setObjectName("opacity")
+        self.opacity_slider.setRange(30, 100)
+        self.opacity_slider.setValue(round(float(getattr(self.config, "opacity", 1.0)) * 100))
+        self.opacity_slider.valueChanged.connect(self._on_opacity)
+        display_form.addRow("窗口透明度", self.opacity_slider)
+
+        caption_hint = QLabel("字幕气泡与番茄钟胶囊都跟着这里放大；窗口透明度只影响人物层，不影响气泡可读性。")
+        caption_hint.setObjectName("section_hint")
+        caption_hint.setWordWrap(True)
+        display_form.addRow(caption_hint)
+        layout.addWidget(display)
+
         body_group = QGroupBox("火柴人躯体")
         form = QFormLayout(body_group)
 
@@ -577,10 +578,7 @@ class SettingsDialog(QDialog):
         self.frosted_check.toggled.connect(self._on_frosted)
         frosted_form.addRow(self.frosted_check)
 
-        frosted_hint = QLabel(
-            "磨砂只作用于菜单和这个设置窗口。桌宠本身始终绝对透明："
-            "除了大头与火柴人线条，其余区域连点击都会穿透到桌面。"
-        )
+        frosted_hint = QLabel("磨砂只作用于菜单与设置窗口；桌宠本身始终绝对透明。")
         frosted_hint.setObjectName("section_hint")
         frosted_hint.setWordWrap(True)
         frosted_form.addRow(frosted_hint)
@@ -769,15 +767,15 @@ class SettingsDialog(QDialog):
         self._persist()
 
     def _refresh_volume_hint(self, percent: int) -> None:
-        """音量偏低时说明决战模式的渐强听不出来，避免被当成「没声音」。"""
-        if percent < 40:
+        """音量偏低时说明决战模式的起步会显得更轻，避免被当成「没声音」。"""
+        if percent < 20:
             self.volume_hint.setText(
-                "⚠ 当前音量偏低：决战模式的渐强在轻声下几乎听不出来，"
-                "建议调到 40% 以上。"
+                "⚠ 当前音量偏低：决战模式从 20% 起步，在轻声下几乎听不出来，"
+                "建议调到 50% 以上。"
             )
         else:
             self.volume_hint.setText(
-                "决战模式会在你设定的音量内，由 55% 逐句渐强到 100%。"
+                "决战模式会在你设定的音量内，由 20% 逐句渐强到 100%。"
             )
 
     def _set_voice(self, mode: str) -> None:
@@ -796,7 +794,11 @@ class SettingsDialog(QDialog):
         self._persist()
 
     def _on_crosstalk_lines(self, index: int) -> None:
-        lines = int(self.crosstalk_combo.itemData(index))
+        value = self.crosstalk_combo.itemData(index)
+        if value is None:
+            # 选中项被清空（例如重新填充下拉框）时不写入配置。
+            return
+        lines = int(value)
         self.runtime.controller.set_crosstalk_lines(lines)
         self.config.crosstalk_lines = lines
         self._persist()

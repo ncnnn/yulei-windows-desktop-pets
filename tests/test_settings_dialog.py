@@ -369,10 +369,19 @@ def test_crosstalk_lines_combo(app):
     dialog = SettingsDialog(runtime, config)
 
     combo = _combo(dialog, "crosstalk_lines")
-    combo.setCurrentIndex(combo.findData(10))
-    assert runtime.controller.crosstalk_lines == 10
-    assert config.crosstalk_lines == 10
+    combo.setCurrentIndex(combo.findData(20))
+    assert runtime.controller.crosstalk_lines == 20
+    assert config.crosstalk_lines == 20
     assert config._saved
+
+
+def test_crosstalk_lines_presets_include_twenty(app):
+    """默认一次说满 20 句，不用每次去菜单里改。"""
+    dialog = SettingsDialog(FakeRuntime(), Config())
+    combo = _combo(dialog, "crosstalk_lines")
+
+    assert combo.findData(20) >= 0
+    assert combo.findData(8) >= 0
 
 
 def test_reduce_motion_applies_to_windows(app):
@@ -439,7 +448,7 @@ def test_volume_hint_warns_below_battle_ladder(app):
     assert "音量偏低" in dialog.volume_hint.text()
 
     dialog._on_volume(60)
-    assert "55%" in dialog.volume_hint.text()
+    assert "20%" in dialog.volume_hint.text()
     assert "音量偏低" not in dialog.volume_hint.text()
 
 

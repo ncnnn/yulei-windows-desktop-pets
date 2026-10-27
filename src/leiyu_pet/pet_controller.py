@@ -349,11 +349,10 @@ class PetController(QObject):
         return True
 
     def start_battle(self, lines: int | None = None) -> bool:
-        """决战模式：同样是相声的问答节奏，每句音量从 55% 渐强到当前音量。
+        """决战模式：同样是相声的问答节奏，每句音量从 20% 渐强到 100%。
 
         音量按「相对用户设置」的倍率处理：用户把总音量调到 30%，整段都会跟着
-        变轻但仍有渐强；静音状态下依然保持静音。起点定在 55%（而不是更低的
-        20%）是因为绝对 20% 在笔记本喇叭上基本等于静音，会被当成 bug。
+        变轻但仍有渐强；静音状态下依然保持静音。
         """
         if not self.both_visible():
             return False
@@ -366,8 +365,9 @@ class PetController(QObject):
         ]
         if self.base_volume < BATTLE_HINT_VOLUME - 1e-9:
             self.notice.emit(
-                f"当前音量 {round(self.base_volume * 100)}% 偏低，"
-                f"决战模式的渐强听不太出来，建议调到 {round(BATTLE_HINT_VOLUME * 100)}% 以上"
+                f"当前音量 {round(self.base_volume * 100)}%，"
+                f"决战模式从 20% 起步会显得更轻，建议调到 "
+                f"{round(BATTLE_HINT_VOLUME * 100)}% 以上"
             )
         self.dialogue.cancel()
         self._enter_mode("battle")

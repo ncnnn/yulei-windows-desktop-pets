@@ -86,8 +86,6 @@ for _name, _mod in _STUBS.items():
 import pytest  # noqa: E402
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon  # noqa: E402
 
-from leiyu_pet import tray as tray_module  # noqa: E402
-from leiyu_pet.autostart import is_enabled  # noqa: E402
 from leiyu_pet.config import Config  # noqa: E402
 from leiyu_pet.context_menu import ROLE_NAMES  # noqa: E402
 from leiyu_pet.tray import ROLES, TrayManager  # noqa: E402
@@ -264,6 +262,14 @@ def _submenu(tray, title):
     raise AssertionError(f"submenu {title!r} not found")
 
 
+def _start_action(tray, prefix: str):
+    """按前缀取菜单项：相声/决战文案里带着当前句数。"""
+    for action in tray._menu.actions():
+        if action.text().startswith(prefix):
+            return action
+    raise AssertionError(f"action starting with {prefix!r} not found")
+
+
 def test_tray_builds_and_shows(app):
     runtime = FakeRuntime()
     config = Config()
@@ -278,10 +284,18 @@ def test_tray_builds_and_shows(app):
     assert "设置" in texts
     assert "退出" in texts
     titles = {submenu.title() for submenu in tray._submenus}
-    assert {"声音模式", "音量", "歪头距离", "人物大小", "雷军", "余承东"} <= titles
+    assert {"声音模式", "音量", "番茄钟"} <= titles
 
-    child_menus = [sm for sm in tray._submenus if sm.title() in ROLE_NAMES.values()]
-    assert len(child_menus) == 2
+
+def test_tray_menu_stays_compact(app):
+    """托盘只留高频入口：播放速度、歪头距离、人物大小、开机自启都收进设置页。"""
+    tray = TrayManager(FakeRuntime(), Config())
+    tray.build_menu()
+
+    texts = [action.text() for action in tray._menu.actions() if action.text()]
+    assert len(texts) <= 14
+    for legacy in ("最近说过", "两人对话一句", "歪头距离", "人物大小", "开机自启"):
+        assert legacy not in texts
 
 
 def test_playback_actions_call_controller(app):
@@ -291,11 +305,11 @@ def test_playback_actions_call_controller(app):
 
     _action(tray._menu, f"{ROLE_NAMES['lei']}随机说一段").trigger()
     _action(tray._menu, f"{ROLE_NAMES['yu']}随机说一段").trigger()
-    _action(tray._menu, "两人对话一句").trigger()
+    _start_action(tray, "相声模式").trigger()
     _action(tray._menu, "停止播放").trigger()
 
     calls = [c[0] for c in runtime.controller.calls]
-    assert calls == ["play_solo", "play_solo", "start_pair", "stop_all"]
+    assert calls == ["play_solo", "play_solo", "start_crosstalk", "stop_all"]
 
 
 def test_role_visibility_toggle(app):
@@ -320,26 +334,6 @@ def test_volume_radio_sets_runtime_volume(app):
     assert ("set_volume", 0.5) in runtime.calls
 
 
-def test_distance_radio_sets_runtime_distance(app):
-    runtime = FakeRuntime()
-    tray = TrayManager(runtime, Config())
-    tray.build_menu()
-
-    distance_menu = _submenu(tray, "歪头距离")
-    _action(distance_menu, "贴近（8）").trigger()
-    assert ("set_distance", 8) in runtime.calls
-
-
-def test_size_radio_sets_pet_size(app):
-    runtime = FakeRuntime()
-    tray = TrayManager(runtime, Config())
-    tray.build_menu()
-
-    lei_menu = _submenu(tray, ROLE_NAMES["lei"])
-    _action(lei_menu, "小").trigger()
-    assert ("set_pet_size", "lei", 170) in runtime.calls
-
-
 def test_voice_mode_radio(app):
     runtime = FakeRuntime()
     tray = TrayManager(runtime, Config())
@@ -348,46 +342,6 @@ def test_voice_mode_radio(app):
     voice_menu = _submenu(tray, "声音模式")
     _action(voice_menu, "1.5倍氦气版").trigger()
     assert runtime.controller.voice_mode == "helium"
-
-
-def test_tilt_toggle(app):
-    runtime = FakeRuntime()
-    tray = TrayManager(runtime, Config())
-    tray.build_menu()
-
-    _action(tray._menu, "靠近时互相歪头").trigger()
-    assert runtime.controller.tilt_enabled is False
-
-
-def test_autostart_toggle_saves_config(app):
-    runtime = FakeRuntime()
-    config = Config()
-    tray = TrayManager(runtime, config)
-    tray.build_menu()
-
-    _action(tray._menu, "开机自启").trigger()
-    assert is_enabled() is True
-    assert config.autostart is True
-    assert config._saved
-
-
-def test_autostart_failure_falls_back(app, monkeypatch):
-    runtime = FakeRuntime()
-    config = Config()
-    tray = TrayManager(runtime, config)
-    tray.build_menu()
-
-    messages = []
-    tray._tray.showMessage = lambda *args, **kwargs: messages.append(args)
-
-    def _boom(enabled, exe_path=None):
-        raise OSError("denied")
-
-    monkeypatch.setattr(tray_module, "set_enabled", _boom)
-    _action(tray._menu, "开机自启").trigger()
-
-    assert config.autostart is False
-    assert messages
 
 
 def test_double_click_toggles_all(app):
@@ -421,22 +375,6 @@ def test_quit_callback(app):
     assert called == [1]
 
 
-def test_crosstalk_menu_starts_and_sets_lines(app):
-    runtime = FakeRuntime()
-    config = Config()
-    tray = TrayManager(runtime, config)
-    tray.build_menu()
-
-    crosstalk_menu = _submenu(tray, "相声模式")
-    _action(crosstalk_menu, "8 句").trigger()
-    _action(crosstalk_menu, "开始（一问一答交替说）").trigger()
-
-    assert ("set_crosstalk_lines", 8) in runtime.controller.calls
-    assert config.crosstalk_lines == 8
-    assert config._saved
-    assert ("start_crosstalk", None) in runtime.controller.calls
-
-
 def test_crosstalk_starts_after_showing_all(app):
     runtime = FakeRuntime()
     runtime.windows["yu"].setVisible(False)
@@ -451,7 +389,7 @@ def test_crosstalk_starts_after_showing_all(app):
     tray = TrayManager(runtime, Config())
     tray.build_menu()
 
-    _action(_submenu(tray, "相声模式"), "开始（一问一答交替说）").trigger()
+    _start_action(tray, "相声模式").trigger()
 
     assert attempts == [False, True]
     assert ("show_all",) in runtime.calls
