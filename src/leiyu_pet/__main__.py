@@ -12,7 +12,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from . import __version__
+from . import APP_NAME, __version__
 
 #: 判定"这是一个可用素材包"所需的根文件。
 PACK_ROOT_FILES = ("lei.png", "yu.png", "clips.json", "clips-helium.json", "pairs.json")
@@ -21,7 +21,7 @@ LOGGER = logging.getLogger("leiyu_pet")
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="雷余双桌宠 Windows 版")
+    parser = argparse.ArgumentParser(description=f"{APP_NAME} Windows 版")
     parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument("--reset", action="store_true", help="清除本地配置后以默认值启动")
     parser.add_argument(

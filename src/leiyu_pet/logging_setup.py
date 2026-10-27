@@ -13,6 +13,8 @@ from collections.abc import Callable
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
+from . import APP_NAME
+
 LOGGER_NAME = "leiyu_pet"
 LOG_MAX_BYTES = 512 * 1024
 LOG_BACKUP_COUNT = 2
@@ -62,7 +64,7 @@ def install_excepthook(
         logger.critical("未捕获异常", exc_info=(exc_type, exc_value, exc_tb))
         if notify is not None:
             try:
-                notify("雷余双桌宠", f"出现异常：{exc_type.__name__}，详情见日志")
+                notify(APP_NAME, f"出现异常：{exc_type.__name__}，详情见日志")
             except Exception:
                 pass
 

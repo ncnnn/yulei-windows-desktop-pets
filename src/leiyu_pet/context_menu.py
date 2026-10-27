@@ -27,7 +27,7 @@ class ContextMenuManager(QObject):
 
     def show(self, role: Role, position: QPoint) -> QMenu:
         window = self.runtime.windows[role]
-        menu = QMenu(window)
+        menu = frosted_ui.FrostedMenu(window)
         self._menus.append(menu)
         menu.aboutToHide.connect(partial(self._release, menu))
 
@@ -38,7 +38,7 @@ class ContextMenuManager(QObject):
         self._add_action(menu, f"相声模式（一问一答 {lines} 句）", self._start_crosstalk)
         self._add_action(menu, "决战模式（音量 20%→70%）", self._start_battle)
 
-        pick_menu = menu.addMenu("挑一段")
+        pick_menu = frosted_ui.submenu(menu, "挑一段")
         for clip in self.runtime.pack.clips_for(
             role,
             self.runtime.controller.voice_mode,
@@ -51,7 +51,7 @@ class ContextMenuManager(QObject):
                 partial(self.runtime.controller.play_solo, role, clip.id),
             )
 
-        history_menu = menu.addMenu("最近说过")
+        history_menu = frosted_ui.submenu(menu, "最近说过")
         entries = self.runtime.controller.recent(role, 6)
         if not entries:
             empty = history_menu.addAction("暂无记录")
@@ -73,7 +73,7 @@ class ContextMenuManager(QObject):
 
         assistant = getattr(self.runtime, "assistant", None)
         if assistant is not None:
-            focus_menu = menu.addMenu("番茄钟")
+            focus_menu = frosted_ui.submenu(menu, "番茄钟")
             self._add_action(focus_menu, "开始专注", self._start_pomodoro)
             self._add_action(focus_menu, "停止计时", assistant.stop_pomodoro)
             status = focus_menu.addAction(assistant.pomodoro_status())
@@ -143,7 +143,7 @@ class ContextMenuManager(QObject):
         )
         frosted_action.setChecked(bool(getattr(config, "frosted_ui_enabled", True)))
 
-        action_menu = menu.addMenu("让 TA 做个动作")
+        action_menu = frosted_ui.submenu(menu, "让 TA 做个动作")
         for state in RANDOM_ACTIONS:
             self._add_action(
                 action_menu,
@@ -218,7 +218,7 @@ class ContextMenuManager(QObject):
             assistant.start_pomodoro()
 
     def _add_voice_menu(self, menu: QMenu) -> None:
-        voice_menu = menu.addMenu("声音模式")
+        voice_menu = frosted_ui.submenu(menu, "声音模式")
         group = QActionGroup(voice_menu)
         group.setExclusive(True)
         for mode, label in (("normal", "原声"), ("helium", "1.5倍氦气版")):
@@ -232,7 +232,7 @@ class ContextMenuManager(QObject):
             group.addAction(action)
 
     def _add_volume_menu(self, menu: QMenu) -> None:
-        volume_menu = menu.addMenu("音量")
+        volume_menu = frosted_ui.submenu(menu, "音量")
         group = QActionGroup(volume_menu)
         group.setExclusive(True)
         for percent in (0, 25, 50, 65, 80, 100):
@@ -246,7 +246,7 @@ class ContextMenuManager(QObject):
             group.addAction(action)
 
     def _add_distance_menu(self, menu: QMenu) -> None:
-        distance_menu = menu.addMenu("歪头距离")
+        distance_menu = frosted_ui.submenu(menu, "歪头距离")
         group = QActionGroup(distance_menu)
         group.setExclusive(True)
         for distance, label in ((8, "贴近"), (32, "靠近"), (80, "较远")):
@@ -260,7 +260,7 @@ class ContextMenuManager(QObject):
             group.addAction(action)
 
     def _add_size_menu(self, menu: QMenu, role: Role) -> None:
-        size_menu = menu.addMenu("人物大小")
+        size_menu = frosted_ui.submenu(menu, "人物大小")
         group = QActionGroup(size_menu)
         group.setExclusive(True)
         for size, label in ((170, "小"), (220, "中"), (290, "大")):

@@ -10,17 +10,26 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QRectF, Qt, QTime, QUrl
-from PySide6.QtGui import QDesktopServices, QMouseEvent, QPainter, QPaintEvent, QPalette
+from PySide6.QtGui import (
+    QDesktopServices,
+    QGuiApplication,
+    QMouseEvent,
+    QPainter,
+    QPaintEvent,
+    QPalette,
+)
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QFrame,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QScrollArea,
     QSlider,
     QTabWidget,
     QTimeEdit,
@@ -29,7 +38,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from . import __version__, frosted_ui, paths
+from . import APP_NAME, __version__, frosted_ui, paths
 from .auto_dialog import CHANCE_LABELS, DIALOG_CHANCES, DIALOG_MODES, MODE_LABELS
 from .autostart import is_enabled, set_enabled
 from .config import Config, save_config
@@ -53,52 +62,234 @@ COPYRIGHT_NOTICE = (
 )
 
 
+#: 无边框透明窗口没有系统投影，阴影只能画在窗口内部，布局要留出这么多边距。
+SHADOW_MARGIN = 14
+#: 设置窗口的高度范围：贴着内容走，太矮没法看、太高顶出屏幕。
+MIN_HEIGHT = 380
+MAX_HEIGHT = 720
+#: 设置窗口的高度范围：贴着内容走，太矮没法看、太高顶出屏幕。
+MIN_HEIGHT = 380
+MAX_HEIGHT = 720
+
+
 class SettingsDialog(QDialog):
     def __init__(self, runtime, config: Config) -> None:
         super().__init__()
         self.runtime = runtime
         self.config = config
-        self.setWindowTitle(f"雷余双桌宠设置 — v{__version__}")
-        self.setMinimumWidth(460)
+        self.setWindowTitle(f"{APP_NAME} — v{__version__}")
+        self.setMinimumWidth(540)
         #: 磨砂关闭时要还原的原始调色板（构造时先存一份）。
         self._plain_palette = QPalette(self.palette())
         self._drag_offset = None
         self._plan = frosted_ui.dialog_plan(bool(getattr(config, "frosted_ui_enabled", True)))
 
         self._header = QWidget(self)
+        self._header.setObjectName("dialog_header")
         header = QHBoxLayout(self._header)
-        header.setContentsMargins(6, 2, 2, 2)
-        self._title = QLabel(f"雷余双桌宠设置 — v{__version__}")
-        header.addWidget(self._title)
+        header.setContentsMargins(2, 0, 0, 0)
+        header.setSpacing(10)
+        titles = QVBoxLayout()
+        titles.setContentsMargins(0, 0, 0, 0)
+        titles.setSpacing(1)
+        self._title = QLabel(APP_NAME)
+        self._title.setObjectName("dialog_title")
+        self._subtitle = QLabel(f"设置 · v{__version__}")
+        self._subtitle.setObjectName("dialog_subtitle")
+        titles.addWidget(self._title)
+        titles.addWidget(self._subtitle)
+        header.addLayout(titles)
         header.addStretch(1)
         close_button = QToolButton(self._header)
         close_button.setObjectName("dialog_close")
         close_button.setText("×")
+        close_button.setFixedSize(28, 28)
         close_button.setAutoRaise(True)
         close_button.setCursor(Qt.CursorShape.PointingHandCursor)
         close_button.clicked.connect(self.reject)
-        header.addWidget(close_button)
+        header.addWidget(close_button, 0, Qt.AlignmentFlag.AlignTop)
+
+        self._rule = QFrame(self)
+        self._rule.setObjectName("dialog_rule")
+        self._rule.setFixedHeight(1)
 
         self._tabs = QTabWidget(self)
-        self._tabs.addTab(self._build_sound_tab(), "声音")
-        self._tabs.addTab(self._build_interaction_tab(), "互动")
-        self._tabs.addTab(self._build_appearance_tab(), "外观")
-        self._tabs.addTab(self._build_system_tab(), "系统")
-        self._tabs.addTab(self._build_about_tab(), "关于")
+        self._tabs.tabBar().setDrawBase(False)
+        self._tabs.setDocumentMode(True)
+        self._tabs.addTab(self._scrollable(self._build_sound_tab()), "声音")
+        self._tabs.addTab(self._scrollable(self._build_interaction_tab()), "互动")
+        self._tabs.addTab(self._scrollable(self._build_appearance_tab()), "外观")
+        self._tabs.addTab(self._scrollable(self._build_system_tab()), "系统")
+        self._tabs.addTab(self._scrollable(self._build_about_tab()), "关于")
 
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
-        buttons.rejected.connect(self.reject)
-        buttons.accepted.connect(self.accept)
+        self._buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, self)
+        self._buttons.rejected.connect(self.reject)
+        self._buttons.accepted.connect(self.accept)
+        close_action = self._buttons.button(QDialogButtonBox.StandardButton.Close)
+        if close_action is not None:
+            close_action.setText("关闭")
+            close_action.setMinimumWidth(88)
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(14, 10, 14, 12)
-        layout.setSpacing(8)
-        layout.addWidget(self._header)
-        layout.addWidget(self._tabs, 1)
-        layout.addWidget(buttons)
+        self._layout = QVBoxLayout(self)
+        self._layout.setSpacing(10)
+        self._layout.addWidget(self._header)
+        self._layout.addWidget(self._rule)
+        self._layout.addWidget(self._tabs, 1)
+        self._layout.addWidget(self._buttons)
+        self._apply_margins()
         self._apply_material()
+        self._tabs.currentChanged.connect(self._fit_to_content)
+        self._fit_to_content()
+
+    def _fit_to_content(self, *_args) -> None:
+        """窗口高度贴着当前页签的内容走。
+
+        页签之间内容量差得远（声音 5 行、互动 3 组卡片），固定高度总会有一页
+        空一大块；这里按内容算高度，超出上限才交给滚动条。
+        """
+        page = self._current_page()
+        width, height = 560, MAX_HEIGHT
+        if page is not None:
+            chrome = (
+                self._layout.contentsMargins().top()
+                + self._layout.contentsMargins().bottom()
+                + self._header.sizeHint().height()
+                + self._rule.height()
+                + self._buttons.sizeHint().height()
+                + self._layout.spacing() * 3
+                + self._tabs.tabBar().sizeHint().height()
+                + 12
+            )
+            height = min(MAX_HEIGHT, max(MIN_HEIGHT, chrome + page.sizeHint().height()))
+        screen = QGuiApplication.primaryScreen()
+        if screen is not None:
+            available = screen.availableGeometry()
+            width = min(width, int(available.width() * 0.9))
+            height = min(height, int(available.height() * 0.88))
+        self.resize(width, height)
+
+    @staticmethod
+    def _left_aligned(widget: QWidget) -> QWidget:
+        """把按钮放进一个左对齐的容器，避免被表单拉成整行宽的色条。"""
+        row = QWidget()
+        box = QHBoxLayout(row)
+        box.setContentsMargins(0, 4, 0, 0)
+        box.addWidget(widget)
+        box.addStretch(1)
+        return row
+
+    @staticmethod
+    def _left_aligned(widget: QWidget) -> QWidget:
+        """把按钮放进一个左对齐的容器，避免被表单拉成整行宽的色条。"""
+        row = QWidget()
+        box = QHBoxLayout(row)
+        box.setContentsMargins(0, 4, 0, 0)
+        box.addWidget(widget)
+        box.addStretch(1)
+        return row
+
+    def _current_page(self) -> QWidget | None:
+        widget = self._tabs.widget(self._tabs.currentIndex())
+        if isinstance(widget, QScrollArea):
+            return widget.widget()
+        return widget
+
+    def _scrollable(self, page: QWidget) -> QScrollArea:
+        """把页签内容装进滚动区：内容多就滚，不再把窗口撑到屏幕外。"""
+        page.setObjectName("tab_page")
+        page.setAutoFillBackground(False)
+        area = QScrollArea(self)
+        area.setWidgetResizable(True)
+        area.setFrameShape(QFrame.Shape.NoFrame)
+        area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        viewport = area.viewport()
+        viewport.setObjectName("scroll_viewport")
+        viewport.setAutoFillBackground(False)
+        viewport.setStyleSheet(
+            "QWidget#scroll_viewport { background: transparent; }"
+        )
+        area.setWidget(page)
+        return area
+
+    def _fit_to_content(self, *_args) -> None:
+        """窗口高度贴着当前页签的内容走。
+
+        页签之间内容量差得远（声音 5 行、互动 3 组卡片），固定高度总会有一页
+        空一大块；这里按内容算高度，超出上限才交给滚动条。
+        """
+        page = self._current_page()
+        width, height = 560, MAX_HEIGHT
+        if page is not None:
+            chrome = (
+                self._layout.contentsMargins().top()
+                + self._layout.contentsMargins().bottom()
+                + self._header.sizeHint().height()
+                + self._rule.height()
+                + self._buttons.sizeHint().height()
+                + self._layout.spacing() * 3
+                + self._tabs.tabBar().sizeHint().height()
+                + 12
+            )
+            height = min(MAX_HEIGHT, max(MIN_HEIGHT, chrome + page.sizeHint().height()))
+        screen = QGuiApplication.primaryScreen()
+        if screen is not None:
+            available = screen.availableGeometry()
+            width = min(width, int(available.width() * 0.9))
+            height = min(height, int(available.height() * 0.88))
+        self.resize(width, height)
+
+    @staticmethod
+    def _left_aligned(widget: QWidget) -> QWidget:
+        """把按钮放进一个左对齐的容器，避免被表单拉成整行宽的色条。"""
+        row = QWidget()
+        box = QHBoxLayout(row)
+        box.setContentsMargins(0, 4, 0, 0)
+        box.addWidget(widget)
+        box.addStretch(1)
+        return row
+
+    @staticmethod
+    def _left_aligned(widget: QWidget) -> QWidget:
+        """把按钮放进一个左对齐的容器，避免被表单拉成整行宽的色条。"""
+        row = QWidget()
+        box = QHBoxLayout(row)
+        box.setContentsMargins(0, 4, 0, 0)
+        box.addWidget(widget)
+        box.addStretch(1)
+        return row
+
+    def _current_page(self) -> QWidget | None:
+        widget = self._tabs.widget(self._tabs.currentIndex())
+        if isinstance(widget, QScrollArea):
+            return widget.widget()
+        return widget
+
+    def _scrollable(self, page: QWidget) -> QScrollArea:
+        """把页签内容装进滚动区：内容多就滚，不再把窗口撑到屏幕外。"""
+        page.setObjectName("tab_page")
+        page.setAutoFillBackground(False)
+        area = QScrollArea(self)
+        area.setWidgetResizable(True)
+        area.setFrameShape(QFrame.Shape.NoFrame)
+        area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        viewport = area.viewport()
+        viewport.setObjectName("scroll_viewport")
+        viewport.setAutoFillBackground(False)
+        viewport.setStyleSheet(
+            "QWidget#scroll_viewport { background: transparent; }"
+        )
+        area.setWidget(page)
+        return area
 
     # ------------------------------------------------------------ 磨砂材质
+
+    def _apply_margins(self) -> None:
+        """磨砂时给外阴影留出边距；普通对话框不需要那圈空白。"""
+        if self._plan.enabled:
+            pad = SHADOW_MARGIN
+            self._layout.setContentsMargins(pad, pad - 4, pad, pad + 4)
+        else:
+            self._layout.setContentsMargins(14, 12, 14, 14)
 
     def _apply_material(self) -> None:
         """按当前计划切换「无边框磨砂」与「普通对话框」两套外观。"""
@@ -113,9 +304,12 @@ class SettingsDialog(QDialog):
             self.show()
         if plan.enabled:
             frosted_ui.prepare_dialog(self, plan)
+            # 下拉框的三角箭头换成 chevron，必须在样式表之后装。
+            frosted_ui.install_style(self)
         else:
             self.setPalette(self._plain_palette)
             self.setStyleSheet("")
+        self._apply_margins()
         self.update()
 
     def paintEvent(self, event: QPaintEvent) -> None:
@@ -124,7 +318,9 @@ class SettingsDialog(QDialog):
             return
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        frosted_ui.paint_background(painter, QRectF(self.rect()), self._plan)
+        frosted_ui.paint_panel(
+            painter, QRectF(self.rect()), self._plan, shadow=SHADOW_MARGIN
+        )
 
     def showEvent(self, event) -> None:  # noqa: N802 - Qt 命名
         super().showEvent(event)
@@ -156,7 +352,10 @@ class SettingsDialog(QDialog):
     # ---------------------------------------------------------------- 声音
     def _build_sound_tab(self) -> QWidget:
         page = QWidget()
-        form = QFormLayout(page)
+        layout = QVBoxLayout(page)
+
+        playback = QGroupBox("播放")
+        form = QFormLayout(playback)
 
         self.volume_slider = QSlider(Qt.Orientation.Horizontal)
         self.volume_slider.setObjectName("volume")
@@ -166,7 +365,7 @@ class SettingsDialog(QDialog):
         form.addRow("音量", self.volume_slider)
 
         self.volume_hint = QLabel("")
-        self.volume_hint.setObjectName("volume_hint")
+        self.volume_hint.setObjectName("section_hint")
         self.volume_hint.setWordWrap(True)
         form.addRow(self.volume_hint)
         self._refresh_volume_hint(round(self.runtime.volume * 100))
@@ -196,33 +395,45 @@ class SettingsDialog(QDialog):
         self.rate_combo.currentIndexChanged.connect(self._on_rate)
         form.addRow("播放速度", self.rate_combo)
 
-        self.caption_size_slider = QSlider(Qt.Orientation.Horizontal)
-        self.caption_size_slider.setObjectName("caption_font_size")
-        self.caption_size_slider.setRange(9, 20)
-        self.caption_size_slider.setValue(int(getattr(self.config, "caption_font_size", 11)))
-        self.caption_size_slider.valueChanged.connect(self._on_caption_size)
-        form.addRow("字幕字号", self.caption_size_slider)
-
-        self.opacity_slider = QSlider(Qt.Orientation.Horizontal)
-        self.opacity_slider.setObjectName("opacity")
-        self.opacity_slider.setRange(30, 100)
-        self.opacity_slider.setValue(
-            round(float(getattr(self.config, "opacity", 1.0)) * 100)
-        )
-        self.opacity_slider.valueChanged.connect(self._on_opacity)
-        form.addRow("窗口透明度", self.opacity_slider)
-
         self.explicit_check = QCheckBox("允许第 17 段（含粗口）")
         self.explicit_check.setObjectName("explicit")
         self.explicit_check.setChecked(self.runtime.controller.include_explicit)
         self.explicit_check.toggled.connect(self._on_explicit)
         form.addRow(self.explicit_check)
+        layout.addWidget(playback)
+
+        display = QGroupBox("字幕与显示")
+        display_form = QFormLayout(display)
+
+        self.caption_size_slider = QSlider(Qt.Orientation.Horizontal)
+        self.caption_size_slider.setObjectName("caption_font_size")
+        self.caption_size_slider.setRange(9, 20)
+        self.caption_size_slider.setValue(int(getattr(self.config, "caption_font_size", 11)))
+        self.caption_size_slider.valueChanged.connect(self._on_caption_size)
+        display_form.addRow("字幕字号", self.caption_size_slider)
+
+        self.opacity_slider = QSlider(Qt.Orientation.Horizontal)
+        self.opacity_slider.setObjectName("opacity")
+        self.opacity_slider.setRange(30, 100)
+        self.opacity_slider.setValue(round(float(getattr(self.config, "opacity", 1.0)) * 100))
+        self.opacity_slider.valueChanged.connect(self._on_opacity)
+        display_form.addRow("窗口透明度", self.opacity_slider)
+
+        caption_hint = QLabel("字幕气泡与番茄钟胶囊都跟着这里放大；窗口透明度只影响人物层，不影响气泡可读性。")
+        caption_hint.setObjectName("section_hint")
+        caption_hint.setWordWrap(True)
+        display_form.addRow(caption_hint)
+        layout.addWidget(display)
+        layout.addStretch(1)
         return page
 
     # ---------------------------------------------------------------- 互动
     def _build_interaction_tab(self) -> QWidget:
         page = QWidget()
-        form = QFormLayout(page)
+        layout = QVBoxLayout(page)
+
+        near = QGroupBox("靠近与体型")
+        form = QFormLayout(near)
 
         self.tilt_check = QCheckBox("靠近时互相歪头")
         self.tilt_check.setObjectName("tilt")
@@ -261,9 +472,7 @@ class SettingsDialog(QDialog):
         current_lines = int(self.runtime.controller.crosstalk_lines)
         if self.crosstalk_combo.findData(current_lines) < 0:
             self.crosstalk_combo.addItem(f"{current_lines} 句", current_lines)
-        self.crosstalk_combo.setCurrentIndex(
-            max(self.crosstalk_combo.findData(current_lines), 0)
-        )
+        self.crosstalk_combo.setCurrentIndex(max(self.crosstalk_combo.findData(current_lines), 0))
         self.crosstalk_combo.currentIndexChanged.connect(self._on_crosstalk_lines)
         form.addRow("相声模式句数", self.crosstalk_combo)
 
@@ -272,12 +481,16 @@ class SettingsDialog(QDialog):
         self.reduce_motion_check.setChecked(self.config.reduce_motion)
         self.reduce_motion_check.toggled.connect(self._on_reduce_motion)
         form.addRow(self.reduce_motion_check)
+        layout.addWidget(near)
+
+        roam = QGroupBox("游走与自动对话")
+        roam_form = QFormLayout(roam)
 
         self.wander_check = QCheckBox("空闲时自动在屏幕上溜达")
         self.wander_check.setObjectName("wander")
         self.wander_check.setChecked(bool(getattr(self.config, "wander_enabled", False)))
         self.wander_check.toggled.connect(self._on_wander)
-        form.addRow(self.wander_check)
+        roam_form.addRow(self.wander_check)
 
         self.wander_interval_combo = QComboBox()
         self.wander_interval_combo.setObjectName("wander_interval")
@@ -288,15 +501,13 @@ class SettingsDialog(QDialog):
             max(self.wander_interval_combo.findData(current_interval), 0)
         )
         self.wander_interval_combo.currentIndexChanged.connect(self._on_wander_interval)
-        form.addRow("游走间隔", self.wander_interval_combo)
+        roam_form.addRow("游走间隔", self.wander_interval_combo)
 
         self.overlap_check = QCheckBox("两只叠在一起时自动来一段问答")
         self.overlap_check.setObjectName("overlap")
-        self.overlap_check.setChecked(
-            bool(getattr(self.config, "overlap_easter_egg", False))
-        )
+        self.overlap_check.setChecked(bool(getattr(self.config, "overlap_easter_egg", False)))
         self.overlap_check.toggled.connect(self._on_overlap)
-        form.addRow(self.overlap_check)
+        roam_form.addRow(self.overlap_check)
 
         self.auto_dialog_combo = QComboBox()
         self.auto_dialog_combo.setObjectName("auto_dialog_chance")
@@ -307,7 +518,7 @@ class SettingsDialog(QDialog):
             max(self.auto_dialog_combo.findData(current_chance), 0)
         )
         self.auto_dialog_combo.currentIndexChanged.connect(self._on_auto_dialog_chance)
-        form.addRow("自动移动后对话", self.auto_dialog_combo)
+        roam_form.addRow("自动移动后对话", self.auto_dialog_combo)
 
         self.auto_dialog_mode_combo = QComboBox()
         self.auto_dialog_mode_combo.setObjectName("auto_dialog_mode")
@@ -318,19 +529,23 @@ class SettingsDialog(QDialog):
             max(self.auto_dialog_mode_combo.findData(current_mode), 0)
         )
         self.auto_dialog_mode_combo.currentIndexChanged.connect(self._on_auto_dialog_mode)
-        form.addRow("对话模式", self.auto_dialog_mode_combo)
+        roam_form.addRow("对话模式", self.auto_dialog_mode_combo)
 
         self.duel_check = QCheckBox("对话开场播放决斗特效（VS，约 1 秒）")
         self.duel_check.setObjectName("duel_effect")
         self.duel_check.setChecked(bool(getattr(self.config, "duel_effect_enabled", True)))
         self.duel_check.toggled.connect(self._on_duel_effect)
-        form.addRow(self.duel_check)
+        roam_form.addRow(self.duel_check)
+        layout.addWidget(roam)
+
+        remind = QGroupBox("提醒与番茄钟")
+        remind_form = QFormLayout(remind)
 
         self.hourly_check = QCheckBox("整点报时（静音气泡，不发声）")
         self.hourly_check.setObjectName("hourly_chime")
         self.hourly_check.setChecked(bool(getattr(self.config, "hourly_chime", False)))
         self.hourly_check.toggled.connect(self._on_hourly)
-        form.addRow(self.hourly_check)
+        remind_form.addRow(self.hourly_check)
 
         self.break_reminder_combo = QComboBox()
         self.break_reminder_combo.setObjectName("break_reminder")
@@ -342,7 +557,7 @@ class SettingsDialog(QDialog):
             max(self.break_reminder_combo.findData(current_break), 0)
         )
         self.break_reminder_combo.currentIndexChanged.connect(self._on_break_reminder)
-        form.addRow("久坐提醒", self.break_reminder_combo)
+        remind_form.addRow("久坐提醒", self.break_reminder_combo)
 
         self.focus_combo = QComboBox()
         self.focus_combo.setObjectName("pomodoro_focus")
@@ -351,7 +566,7 @@ class SettingsDialog(QDialog):
         current_focus = int(getattr(self.config, "pomodoro_focus_minutes", 25))
         self.focus_combo.setCurrentIndex(max(self.focus_combo.findData(current_focus), 0))
         self.focus_combo.currentIndexChanged.connect(self._on_pomodoro_times)
-        form.addRow("番茄钟专注时长", self.focus_combo)
+        remind_form.addRow("番茄钟专注时长", self.focus_combo)
 
         self.pomodoro_break_combo = QComboBox()
         self.pomodoro_break_combo.setObjectName("pomodoro_break")
@@ -362,10 +577,11 @@ class SettingsDialog(QDialog):
             max(self.pomodoro_break_combo.findData(current_rest), 0)
         )
         self.pomodoro_break_combo.currentIndexChanged.connect(self._on_pomodoro_times)
-        form.addRow("番茄钟休息时长", self.pomodoro_break_combo)
+        remind_form.addRow("番茄钟休息时长", self.pomodoro_break_combo)
+        layout.addWidget(remind)
+        layout.addStretch(1)
         return page
 
-    # ---------------------------------------------------------------- 系统
     # ---------------------------------------------------------------- 外观
     def _build_appearance_tab(self) -> QWidget:
         page = QWidget()
@@ -430,6 +646,7 @@ class SettingsDialog(QDialog):
         action_form.addRow("动作间隔", self.stick_interval_combo)
 
         hint = QLabel("躯体由代码绘制，改比例/线宽不会重新加载素材；关闭后只显示大头。")
+        hint.setObjectName("section_hint")
         hint.setWordWrap(True)
         action_form.addRow(hint)
         layout.addWidget(action_group)
@@ -446,6 +663,7 @@ class SettingsDialog(QDialog):
             "磨砂只作用于菜单和这个设置窗口。桌宠本身始终绝对透明："
             "除了大头与火柴人线条，其余区域连点击都会穿透到桌面。"
         )
+        frosted_hint.setObjectName("section_hint")
         frosted_hint.setWordWrap(True)
         frosted_form.addRow(frosted_hint)
         layout.addWidget(frosted_group)
@@ -470,11 +688,16 @@ class SettingsDialog(QDialog):
             f"{ACTION_LABELS[action]} {describe_binding(spec)}"
             for action, spec in DEFAULT_BINDINGS.items()
         )
-        self.hotkeys_check = QCheckBox(f"启用全局热键（{hotkey_hint}），重启后生效")
+        self.hotkeys_check = QCheckBox("启用全局热键（重启后生效）")
         self.hotkeys_check.setObjectName("hotkeys")
         self.hotkeys_check.setChecked(self.config.hotkeys_enabled)
         self.hotkeys_check.toggled.connect(self._on_hotkeys)
         startup_form.addRow(self.hotkeys_check)
+
+        hotkey_label = QLabel(hotkey_hint)
+        hotkey_label.setObjectName("section_hint")
+        hotkey_label.setWordWrap(True)
+        startup_form.addRow(hotkey_label)
 
         self.remember_check = QCheckBox("记住两只桌宠的位置，下次启动还原")
         self.remember_check.setObjectName("remember_position")
@@ -513,8 +736,10 @@ class SettingsDialog(QDialog):
         window_form.addRow(self.lock_check)
 
         reset_button = QPushButton("恢复默认位置")
+        reset_button.setObjectName("inline_action")
+        reset_button.setAutoDefault(False)
         reset_button.clicked.connect(self._reset_positions)
-        window_form.addRow(reset_button)
+        window_form.addRow(self._left_aligned(reset_button))
         layout.addWidget(window_group)
 
         quiet_group = QGroupBox("免打扰时段")
@@ -544,11 +769,20 @@ class SettingsDialog(QDialog):
         quiet_form.addRow("结束", self.quiet_end_edit)
         layout.addWidget(quiet_group)
 
+        data_group = QGroupBox("数据")
+        data_layout = QVBoxLayout(data_group)
+        data_hint = QLabel(f"配置、日志与导入的素材都在 {paths.base_dir()}")
+        data_hint.setObjectName("section_hint")
+        data_hint.setWordWrap(True)
+        data_layout.addWidget(data_hint)
         data_button = QPushButton("打开数据目录")
+        data_button.setObjectName("inline_action")
+        data_button.setAutoDefault(False)
         data_button.clicked.connect(
             lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(paths.base_dir())))
         )
-        layout.addWidget(data_button)
+        data_layout.addWidget(self._left_aligned(data_button))
+        layout.addWidget(data_group)
         layout.addStretch(1)
         return page
 
@@ -557,29 +791,52 @@ class SettingsDialog(QDialog):
         page = QWidget()
         layout = QVBoxLayout(page)
 
-        title = QLabel(f"雷余双桌宠 Windows 版 v{__version__}")
-        title.setTextFormat(Qt.TextFormat.PlainText)
-        font = title.font()
-        font.setPointSize(font.pointSize() + 2)
-        font.setBold(True)
-        title.setFont(font)
-        layout.addWidget(title)
+        version_group = QGroupBox("版本信息")
+        version_form = QFormLayout(version_group)
+        version_label = QLabel(f"v{__version__}")
+        version_label.setObjectName("value_text")
+        version_form.addRow("版本号", version_label)
 
-        mode = "便携版（数据写在程序目录 data\\）" if paths.is_portable() else "安装版（数据写在用户目录）"
-        info = QLabel(f"运行模式：{mode}\n数据目录：{paths.base_dir()}")
-        info.setTextFormat(Qt.TextFormat.PlainText)
-        info.setWordWrap(True)
-        layout.addWidget(info)
+        mode = (
+            "便携版（数据写在程序目录 data\\）"
+            if paths.is_portable()
+            else "安装版（数据写在用户目录）"
+        )
+        mode_label = QLabel(mode)
+        mode_label.setWordWrap(True)
+        version_form.addRow("运行模式", mode_label)
 
+        path_label = QLabel(str(paths.base_dir()))
+        path_label.setWordWrap(True)
+        path_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        version_form.addRow("数据目录", path_label)
+        layout.addWidget(version_group)
+
+        credit_group = QGroupBox("版权与致谢")
+        credit_layout = QVBoxLayout(credit_group)
         notice = QLabel(COPYRIGHT_NOTICE)
-        notice.setTextFormat(Qt.TextFormat.PlainText)
+        notice.setObjectName("section_hint")
         notice.setWordWrap(True)
-        layout.addWidget(notice)
+        credit_layout.addWidget(notice)
+        layout.addWidget(credit_group)
 
-        repo = QLabel("仓库：github.com/ncnnn/yulei-windows-desktop-pets")
+        link_group = QGroupBox("项目主页")
+        link_layout = QVBoxLayout(link_group)
+        repo = QLabel("github.com/ncnnn/yulei-windows-desktop-pets")
         repo.setTextFormat(Qt.TextFormat.PlainText)
         repo.setWordWrap(True)
-        layout.addWidget(repo)
+        repo.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        link_layout.addWidget(repo)
+        open_button = QPushButton("在浏览器中打开")
+        open_button.setObjectName("inline_action")
+        open_button.setAutoDefault(False)
+        open_button.clicked.connect(
+            lambda: QDesktopServices.openUrl(
+                QUrl("https://github.com/ncnnn/yulei-windows-desktop-pets")
+            )
+        )
+        link_layout.addWidget(self._left_aligned(open_button))
+        layout.addWidget(link_group)
         layout.addStretch(1)
         return page
 

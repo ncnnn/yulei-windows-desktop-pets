@@ -1,8 +1,8 @@
-; 雷余双桌宠 Windows 版 Inno Setup 安装脚本。
+; 鱼雷双桌宠 Windows 版 Inno Setup 安装脚本。
 ; 前置：先运行 scripts\build_onedir.ps1 生成 dist\leiyu_pet。
 ; 编译：ISCC.exe packaging\leiyu.iss
 
-#define AppName "雷余双桌宠"
+#define AppName "鱼雷双桌宠"
 #ifndef AppVersion
   #define AppVersion "1.2.0"
 #endif

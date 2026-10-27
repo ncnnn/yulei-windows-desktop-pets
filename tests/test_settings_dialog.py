@@ -90,7 +90,11 @@ from PySide6.QtWidgets import (  # noqa: E402
     QApplication,
     QCheckBox,
     QComboBox,
+    QDialogButtonBox,
+    QHBoxLayout,
     QLabel,
+    QPushButton,
+    QScrollArea,
     QSlider,
 )
 
@@ -469,3 +473,48 @@ def test_settings_dialog_is_frameless_and_translucent(app):
     flags = dialog.windowFlags()
     assert flags & Qt.WindowType.FramelessWindowHint
     assert dialog.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+
+
+# ------------------------------------------------------------ 2.1.2 界面重做
+
+
+def test_window_title_uses_the_new_product_name(app):
+    dialog = SettingsDialog(FakeRuntime(), Config())
+    assert "鱼雷双桌宠" in dialog.windowTitle()
+    assert "雷余" not in dialog.windowTitle()
+
+
+def test_every_tab_is_scrollable(app):
+    """内容多的页签要靠滚动消化，不能把窗口顶到屏幕外。"""
+    dialog = SettingsDialog(FakeRuntime(), Config())
+    for index in range(dialog._tabs.count()):
+        assert isinstance(dialog._tabs.widget(index), QScrollArea)
+
+
+def test_inline_buttons_are_left_aligned_and_not_default(app):
+    dialog = SettingsDialog(FakeRuntime(), Config())
+    buttons = dialog.findChildren(QPushButton, "inline_action")
+    assert buttons
+    for button in buttons:
+        assert button.autoDefault() is False
+        # 外层是 HBox 容器，右侧有弹簧，按钮不会被表单拉成整行宽
+        layout = button.parentWidget().layout()
+        assert isinstance(layout, QHBoxLayout)
+        assert layout.count() == 2
+
+
+def test_close_button_is_localised(app):
+    dialog = SettingsDialog(FakeRuntime(), Config())
+    close = dialog._buttons.button(QDialogButtonBox.StandardButton.Close)
+    assert close is not None
+    assert close.text() == "关闭"
+
+
+def test_pages_are_grouped_into_cards(app):
+    """每页都要有卡片分组，否则控件会散在大片空白里。"""
+    from PySide6.QtWidgets import QGroupBox
+
+    dialog = SettingsDialog(FakeRuntime(), Config())
+    for index in range(dialog._tabs.count()):
+        page = dialog._tabs.widget(index).widget()
+        assert page.findChildren(QGroupBox), f"第 {index} 页没有分组卡片"

@@ -6,7 +6,7 @@ from PySide6.QtCore import QObject
 from PySide6.QtGui import QAction, QActionGroup
 from PySide6.QtWidgets import QApplication, QMenu, QStyle, QSystemTrayIcon
 
-from . import frosted_ui
+from . import APP_NAME, frosted_ui
 from .autostart import is_enabled, self_check_requested_but_missing, set_enabled
 from .config import Config, save_config
 from .context_menu import ROLE_NAMES
@@ -54,9 +54,9 @@ class TrayManager(QObject):
             QStyle.StandardPixmap.SP_ComputerIcon
         )
         self._tray.setIcon(icon)
-        self._tray.setToolTip("雷余双桌宠")
+        self._tray.setToolTip(APP_NAME)
 
-        self._menu = QMenu()
+        self._menu = frosted_ui.FrostedMenu()
         self._tray.setContextMenu(self._menu)
         self._actions: list[QAction] = []
         self._submenus: list[QMenu] = []
@@ -171,10 +171,10 @@ class TrayManager(QObject):
         )
         self._add_action(self._menu, "两人对话一句", rt.controller.start_pair)
 
-        history_menu = self._menu.addMenu("最近说过")
+        history_menu = frosted_ui.submenu(self._menu, "最近说过")
         self._submenus.append(history_menu)
         for role in ROLES:
-            role_history = history_menu.addMenu(f"{ROLE_NAMES[role]}最近说过")
+            role_history = frosted_ui.submenu(history_menu, f"{ROLE_NAMES[role]}最近说过")
             self._submenus.append(role_history)
             entries = rt.controller.recent(role, 6)
             if not entries:
@@ -189,7 +189,7 @@ class TrayManager(QObject):
                     lambda _checked=False, r=role, cid=clip_id: rt.controller.play_solo(r, cid),
                 )
 
-        crosstalk_menu = self._menu.addMenu("相声模式")
+        crosstalk_menu = frosted_ui.submenu(self._menu, "相声模式")
         self._submenus.append(crosstalk_menu)
         self._add_action(crosstalk_menu, "开始（一问一答交替说）", self._start_crosstalk)
         self._add_action(
@@ -213,7 +213,7 @@ class TrayManager(QObject):
             rt.toggle_mute,
         )
 
-        focus_menu = self._menu.addMenu("番茄钟")
+        focus_menu = frosted_ui.submenu(self._menu, "番茄钟")
         self._submenus.append(focus_menu)
         self._add_action(focus_menu, "开始专注", self._start_pomodoro)
         self._add_action(focus_menu, "停止计时", self._stop_pomodoro)
@@ -223,7 +223,7 @@ class TrayManager(QObject):
             status = focus_menu.addAction(assistant.pomodoro_status())
             status.setEnabled(False)
 
-        reminder_menu = self._menu.addMenu("提醒")
+        reminder_menu = frosted_ui.submenu(self._menu, "提醒")
         self._submenus.append(reminder_menu)
         self._add_action(
             reminder_menu,
@@ -233,7 +233,7 @@ class TrayManager(QObject):
             pass_checked=True,
             checked=bool(getattr(self.config, "hourly_chime", False)),
         )
-        break_menu = reminder_menu.addMenu("久坐提醒")
+        break_menu = frosted_ui.submenu(reminder_menu, "久坐提醒")
         self._submenus.append(break_menu)
         self._add_radio_group(
             break_menu,
@@ -255,7 +255,7 @@ class TrayManager(QObject):
         )
         self._menu.addSeparator()
 
-        voice_menu = self._menu.addMenu("声音模式")
+        voice_menu = frosted_ui.submenu(self._menu, "声音模式")
         self._submenus.append(voice_menu)
         self._add_radio_group(
             voice_menu,
@@ -265,7 +265,7 @@ class TrayManager(QObject):
             on_trigger=lambda mode: rt.controller.set_voice_mode(mode),
         )
 
-        volume_menu = self._menu.addMenu("音量")
+        volume_menu = frosted_ui.submenu(self._menu, "音量")
         self._submenus.append(volume_menu)
         self._add_radio_group(
             volume_menu,
@@ -275,7 +275,7 @@ class TrayManager(QObject):
             on_trigger=lambda p: rt.set_volume(p / 100),
         )
 
-        speed_menu = self._menu.addMenu("播放速度")
+        speed_menu = frosted_ui.submenu(self._menu, "播放速度")
         self._submenus.append(speed_menu)
         self._add_radio_group(
             speed_menu,
@@ -285,7 +285,7 @@ class TrayManager(QObject):
             on_trigger=lambda rate: rt.set_rate(rate),
         )
 
-        distance_menu = self._menu.addMenu("歪头距离")
+        distance_menu = frosted_ui.submenu(self._menu, "歪头距离")
         self._submenus.append(distance_menu)
         self._add_radio_group(
             distance_menu,
@@ -295,10 +295,10 @@ class TrayManager(QObject):
             on_trigger=lambda d: rt.set_distance(d),
         )
 
-        size_menu = self._menu.addMenu("人物大小")
+        size_menu = frosted_ui.submenu(self._menu, "人物大小")
         self._submenus.append(size_menu)
         for role in ROLES:
-            role_menu = size_menu.addMenu(ROLE_NAMES[role])
+            role_menu = frosted_ui.submenu(size_menu, ROLE_NAMES[role])
             self._submenus.append(role_menu)
             self._add_radio_group(
                 role_menu,
@@ -365,7 +365,7 @@ class TrayManager(QObject):
             checked=bool(getattr(self.config, "frosted_ui_enabled", True)),
         )
 
-        action_menu = self._menu.addMenu("让 TA 做个动作")
+        action_menu = frosted_ui.submenu(self._menu, "让 TA 做个动作")
         self._submenus.append(action_menu)
         for state in RANDOM_ACTIONS:
             self._add_action(
@@ -509,7 +509,7 @@ class TrayManager(QObject):
 
     def _on_mode_changed(self, mode: str) -> None:
         label = MODE_LABELS.get(mode)
-        self._tray.setToolTip(f"雷余双桌宠 · {label}" if label else "雷余双桌宠")
+        self._tray.setToolTip(f"{APP_NAME} · {label}" if label else APP_NAME)
 
     def _on_activated(self, reason) -> None:
         if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
