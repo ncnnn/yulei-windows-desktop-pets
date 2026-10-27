@@ -9,8 +9,8 @@ DIALOG_CHANCES = (0, 25, 50, 75, 100)
 CHANCE_LABELS = {0: "关闭", 25: "低 25%", 50: "中 50%", 75: "高 75%", 100: "总是 100%"}
 
 #: 自动发起的对话走哪种模式。
-DIALOG_MODES = ("crosstalk", "battle", "random")
-MODE_LABELS = {"crosstalk": "相声模式", "battle": "决战模式", "random": "随机"}
+DIALOG_MODES = ("crosstalk", "random")
+MODE_LABELS = {"crosstalk": "相声模式", "random": "随机"}
 
 
 def clamp_chance(value: object) -> int:
@@ -30,7 +30,7 @@ def should_start_dialog(chance: object, roll: float) -> bool:
 
 
 def resolve_mode(mode: str, rng: random.Random | None = None) -> str:
-    """把模式解析成具体实现；random 时在相声/决战之间等概率选。"""
-    if mode in ("crosstalk", "battle"):
+    """把模式解析成具体实现。"""
+    if mode in DIALOG_MODES and mode != "random":
         return mode
-    return (rng or random).choice(("crosstalk", "battle"))
+    return "crosstalk"

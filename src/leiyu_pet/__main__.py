@@ -9,7 +9,6 @@ import logging
 import random
 import sys
 import time
-from datetime import datetime
 from pathlib import Path
 
 from . import APP_NAME, __version__
@@ -89,73 +88,6 @@ def resolve_pack(report: list[str] | None = None):
             LOGGER.warning("素材校验失败 %s", message)
             continue
     return None
-
-
-def apply_config(runtime, settings) -> None:
-    """把配置下发到运行时与各窗口。"""
-    runtime.set_volume(settings.volume)
-    runtime.set_distance(settings.distance)
-
-    controller = runtime.controller
-    controller.set_voice_mode("helium" if settings.helium else "normal")
-    controller.set_include_explicit(settings.include_explicit)
-    controller.set_tilt_enabled(settings.tilt_enabled)
-    controller.set_crosstalk_lines(settings.crosstalk_lines)
-    controller.set_overlap_easter_egg(settings.overlap_easter_egg)
-    controller.set_overlap_trigger_gap(settings.overlap_trigger_gap)
-    runtime.set_muted(bool(getattr(settings, "muted", False)))
-
-    runtime.set_pet_size("lei", settings.lei_size)
-    runtime.set_pet_size("yu", settings.yu_size)
-    runtime.set_rate(settings.playback_rate)
-    runtime.set_opacity(settings.opacity)
-    runtime.set_caption_font_size(settings.caption_font_size)
-    runtime.set_always_on_top(settings.always_on_top)
-    runtime.set_frosted_ui(settings.frosted_ui_enabled)
-    runtime.set_wander_enabled(
-        settings.wander_enabled,
-        settings.wander_interval_seconds,
-    )
-    runtime.set_auto_dialog(
-        settings.auto_move_dialog_chance,
-        settings.auto_move_dialog_mode,
-    )
-    runtime.set_duel_effect_enabled(settings.duel_effect_enabled)
-
-    runtime.set_role_visible("lei", settings.lei_visible)
-    runtime.set_role_visible("yu", settings.yu_visible)
-
-    for window in runtime.windows.values():
-        window.set_locked(settings.lock_position)
-        window.set_click_through(settings.click_through)
-        window.set_reduce_motion(settings.reduce_motion)
-
-    colors = {"lei": settings.stick_color_lei, "yu": settings.stick_color_yu}
-    for role, window in runtime.windows.items():
-        window.set_stick_body_ratio(settings.stick_body_ratio)
-        window.set_stick_line_width(settings.stick_line_width)
-        window.set_stick_neck_overlap(settings.stick_neck_overlap)
-        window.set_stick_color(colors.get(role, settings.stick_color_lei))
-        window.set_stick_spin_axis(settings.stick_spin_axis)
-        window.set_stick_body_enabled(settings.stick_body_enabled)
-    runtime.set_stick_action_settings(
-        settings.stick_random_action_enabled,
-        settings.stick_action_interval,
-    )
-
-    from .quiet_hours import in_quiet_hours
-
-    assistant = runtime.assistant
-    assistant.configure(
-        hourly=settings.hourly_chime,
-        break_minutes=settings.break_reminder_minutes,
-        focus_minutes=settings.pomodoro_focus_minutes,
-        rest_minutes=settings.pomodoro_break_minutes,
-    )
-    assistant.set_quiet_checker(
-        lambda: bool(settings.quiet_hours_enabled)
-        and in_quiet_hours(datetime.now(), settings.quiet_start, settings.quiet_end)
-    )
 
 
 def migrate_legacy_positions(settings) -> bool:
@@ -313,7 +245,7 @@ def main(argv: list[str] | None = None) -> int:
         pack = wizard.pack
 
     from .hotkeys import HotkeyManager
-    from .runtime import PetRuntime
+    from .runtime import PetRuntime, apply_config
     from .settings_dialog import SettingsDialog
     from .tray import TrayManager
     from .update_check import UpdateChecker

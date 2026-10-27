@@ -1,5 +1,6 @@
 """SettingsDialog 测试（offscreen，不弹真实窗口）。"""
 
+import importlib
 import os
 import sys
 import tempfile
@@ -44,6 +45,8 @@ def _build_stub_modules():
 
     config_mod.Config = Config
     config_mod.save_config = save_config
+    # DEFAULTS 是纯常量，直接借真实模块的（stub 只替换路径相关行为）。
+    config_mod.DEFAULTS = importlib.import_module("leiyu_pet.config").DEFAULTS
 
     paths_mod = types.ModuleType("leiyu_pet.paths")
     paths_mod.assets_dir = lambda: _STUB_ROOT / "assets"
@@ -444,17 +447,6 @@ def test_lock_checkbox_applies_and_saves(app):
     assert config.lock_position is True
     assert runtime.windows["lei"].locked is True
     assert config._saved
-
-
-def test_volume_hint_warns_below_battle_ladder(app):
-    dialog = SettingsDialog(FakeRuntime(), Config())
-
-    dialog._on_volume(10)
-    assert "音量偏低" in dialog.volume_hint.text()
-
-    dialog._on_volume(60)
-    assert "20%" in dialog.volume_hint.text()
-    assert "音量偏低" not in dialog.volume_hint.text()
 
 
 def test_interaction_page_has_stage3_controls(app):

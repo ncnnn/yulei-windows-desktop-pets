@@ -9,6 +9,7 @@ from __future__ import annotations
 import random
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from typing import Any
 
 from .models import DialoguePair, PlaybackCommand, Role
 
@@ -18,13 +19,9 @@ DEFAULT_LINES = 20
 #: 菜单里提供的快捷句数，避免用户面对一个无意义的自由输入框。
 LINE_PRESETS = (8, 12, 20)
 
-#: 决战模式的逐句音量：以用户当前音量为 100%，第一句 20%，最后一句 100%。
-#: 用「倍率」而不是绝对音量——绝对 20% 乘上用户 65% 的总音量只剩 13%，
-#: 笔记本喇叭上等于没声。
-BATTLE_START_VOLUME = 0.20
-BATTLE_END_VOLUME = 1.00
-#: 总音量低于这个值时，渐强的落差在听觉上几乎听不出来，需要提示用户。
-BATTLE_HINT_VOLUME = 0.20
+#: 副歌判定阈值（秒）：一组问答里较长的那句都短于它，就当它是「短句副歌」。
+#: 素材里「总有机会 / 追不上」只有 0.3-1.0 秒，靠这个把它们和正经问答分开。
+CHORUS_MAX_SECONDS = 1.5
 
 
 def clamp_lines(lines: int) -> int:
@@ -84,17 +81,82 @@ def commands_from_pairs(
     return commands
 
 
-def battle_multipliers(count: int) -> list[float]:
-    """决战模式每句相对用户总音量的倍率：0.20 线性升到 1.00。
+def crosstalk_script(
+    pack: Any,
+    lines: int = DEFAULT_LINES,
+) -> list[PlaybackCommand]:
+    """整段的剧本：正剧问答 → 短句副歌来回 → 固定收尾。
 
-    返回的是**倍率**，``PetController`` 用 ``用户音量 × 倍率`` 得到绝对音量，
-    因此永远不会比用户设定更吵。
+    素材本身就是一个完整段子，顺序是有讲究的：前几组是正经问答，中段是
+    「总有机会 / 追不上」的短促来回，最后一句是没被任何问答组引用的收尾梗。
+    随机取组会把收尾句插在中间、把副歌放在开头，段子就散了——所以这里按
+    结构排布，句数不够就用副歌补齐，够长就正好停在收尾句上。
+
+    仍然保证严格的「雷军说一句、余承东答一句」交替。
     """
-    total = max(1, int(count))
-    if total == 1:
-        return [BATTLE_END_VOLUME]
-    step = (BATTLE_END_VOLUME - BATTLE_START_VOLUME) / (total - 1)
-    return [round(BATTLE_START_VOLUME + step * index, 3) for index in range(total)]
+    total = clamp_lines(lines)
+    pairs = list(getattr(pack, "pairs", ()))
+    if not pairs:
+        raise ValueError("素材包没有可用的问答组")
+    clips: dict[int, Any] = {clip.id: clip for clip in getattr(pack, "normal_clips", ())}
+
+    def longest(pair: DialoguePair) -> float:
+        lei = clips.get(pair.lei)
+        yu = clips.get(pair.yu)
+        if lei is None or yu is None:
+            return CHORUS_MAX_SECONDS
+        return max(float(getattr(lei, "duration", 0.0)), float(getattr(yu, "duration", 0.0)))
+
+    chorus = [pair for pair in pairs if longest(pair) < CHORUS_MAX_SECONDS]
+    main = [pair for pair in pairs if longest(pair) >= CHORUS_MAX_SECONDS]
+    if not main:
+        main, chorus = pairs, []
+    used = {pair.lei for pair in pairs} | {pair.yu for pair in pairs}
+    # 收尾句：没被任何问答组引用的最后一句（素材里就是那句收尾梗）。
+    orphans = [clip_id for clip_id in sorted(clips) if clip_id not in used]
+    finale = orphans[-1] if orphans else None
+
+    script: list[PlaybackCommand] = []
+    for pair in main:
+        script.append(PlaybackCommand("lei", pair.lei))
+        script.append(PlaybackCommand("yu", pair.yu))
+        if len(script) >= total:
+            return script[:total]
+
+    if finale is None:
+        # 没有收尾句就用副歌把剩下的填满。
+        _fill_chorus(script, chorus, total, fallback=main)
+        return script[:total]
+
+    room = total - len(script) - 1
+    if room > 0:
+        _fill_chorus(script, chorus, len(script) + room, fallback=main)
+    if len(script) < total:
+        script.append(PlaybackCommand(clips[finale].role, finale))
+    return script[:total]
+
+
+def _fill_chorus(
+    script: list[PlaybackCommand],
+    chorus: list[DialoguePair],
+    upto: int,
+    *,
+    fallback: list[DialoguePair] = (),  # noqa: B006 - 只读，不需要默认值工厂
+) -> None:
+    """用短句副歌成对地把剧本填到 ``upto`` 句。
+
+    素材没有副歌（或副歌不够）时退回正剧问答循环，保证剧本凑得满句数。
+    """
+    source = chorus or fallback
+    if not source:
+        return
+    index = 0
+    while len(script) < upto:
+        pair = source[index % len(source)]
+        index += 1
+        script.append(PlaybackCommand("lei", pair.lei))
+        if len(script) < upto:
+            script.append(PlaybackCommand("yu", pair.yu))
 
 
 @dataclass(slots=True)

@@ -267,7 +267,7 @@ def _submenu(tray, title):
 
 
 def _start_action(tray, prefix: str):
-    """按前缀取菜单项：相声/决战文案里带着当前句数。"""
+    """按前缀取菜单项：相声文案里带着当前句数。"""
     for action in tray._menu.actions():
         if action.text().startswith(prefix):
             return action

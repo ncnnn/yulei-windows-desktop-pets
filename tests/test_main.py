@@ -5,6 +5,7 @@ from pathlib import Path
 from leiyu_pet import __main__ as entry
 from leiyu_pet import asset_importer, paths
 from leiyu_pet.config import Config
+from leiyu_pet.runtime import apply_config
 
 
 class FakeWindow:
@@ -180,7 +181,7 @@ def test_apply_config_propagates_to_runtime_and_windows() -> None:
         crosstalk_lines=8,
         reduce_motion=True,
     )
-    entry.apply_config(runtime, cfg)
+    apply_config(runtime, cfg)
 
     assert runtime.volume == 0.3
     assert runtime.distance == 80

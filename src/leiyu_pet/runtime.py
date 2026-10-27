@@ -6,6 +6,7 @@ import logging
 import random
 import time
 from collections.abc import Mapping, Sequence
+from datetime import datetime
 from typing import cast
 
 from PySide6.QtCore import QObject, QPoint, QRect, QTimer
@@ -27,6 +28,7 @@ from .models import AssetPack, Role
 from .pet_controller import PetController
 from .pet_window import PetWindow
 from .platform_win import keep_window_on_screen
+from .quiet_hours import in_quiet_hours
 from .stick_body import RANDOM_ACTIONS
 from .wander import PlayArea, clamp_position, next_target
 
@@ -53,7 +55,7 @@ class PetRuntime(QObject):
         self.pack = pack
         self.windows = dict(windows or self._create_windows())
         self.audio = audio or AudioCoordinator(parent=self)
-        self.volume = 0.65
+        self.volume = 1.0
         self.audio.set_volume(self.volume)
         self._volume_before_mute = self.volume
         #: 捂嘴（禁言）模式：两只都不发声、不主动对话、不游走、不出 VS 特效。
@@ -143,7 +145,7 @@ class PetRuntime(QObject):
                 self._volume_before_mute = self.volume
             self.set_volume(0.0)
         else:
-            self.set_volume(self._volume_before_mute or 0.65)
+            self.set_volume(self._volume_before_mute or 1.0)
         setter = getattr(self.controller, "set_muted", None)
         if callable(setter):
             setter(muted)
@@ -289,13 +291,13 @@ class PetRuntime(QObject):
         """自动移动结束后发起对话的概率与模式（0 表示关闭）。"""
         self._auto_dialog_chance = clamp_chance(chance)
         self._auto_dialog_mode = (
-            mode if mode in {"crosstalk", "battle", "random"} else "crosstalk"
+            mode if mode in {"crosstalk", "random"} else "crosstalk"
         )
         self._persist_setting("auto_move_dialog_chance", self._auto_dialog_chance)
         self._persist_setting("auto_move_dialog_mode", self._auto_dialog_mode)
 
     def set_duel_effect_enabled(self, enabled: bool) -> None:
-        """决斗特效开关（纯视觉，与决战模式的音量阶梯无关）。"""
+        """决斗特效开关（纯视觉的开场动画）。"""
         self._duel_enabled = bool(enabled)
         self._persist_setting("duel_effect_enabled", self._duel_enabled)
         if not self._duel_enabled and self._duel is not None:
@@ -355,11 +357,7 @@ class PetRuntime(QObject):
         if time.monotonic() - self._last_auto_dialog_at < AUTO_DIALOG_COOLDOWN_SECONDS:
             return
         mode = resolve_mode(self._auto_dialog_mode)
-        started = (
-            self.controller.start_battle()
-            if mode == "battle"
-            else self.controller.start_crosstalk()
-        )
+        started = self.controller.start_crosstalk()
         if started:
             self._last_auto_dialog_at = time.monotonic()
             logger.info("自动移动后触发对话：%s", mode)
@@ -525,3 +523,68 @@ class PetRuntime(QObject):
             self._duel = None
         for window in self.windows.values():
             window.close()
+
+
+def apply_config(runtime, settings) -> None:
+    """把配置下发到运行时与各窗口。"""
+    runtime.set_volume(settings.volume)
+    runtime.set_distance(settings.distance)
+
+    controller = runtime.controller
+    controller.set_voice_mode("helium" if settings.helium else "normal")
+    controller.set_include_explicit(settings.include_explicit)
+    controller.set_tilt_enabled(settings.tilt_enabled)
+    controller.set_crosstalk_lines(settings.crosstalk_lines)
+    controller.set_overlap_easter_egg(settings.overlap_easter_egg)
+    controller.set_overlap_trigger_gap(settings.overlap_trigger_gap)
+    runtime.set_muted(bool(getattr(settings, "muted", False)))
+
+    runtime.set_pet_size("lei", settings.lei_size)
+    runtime.set_pet_size("yu", settings.yu_size)
+    runtime.set_rate(settings.playback_rate)
+    runtime.set_opacity(settings.opacity)
+    runtime.set_caption_font_size(settings.caption_font_size)
+    runtime.set_always_on_top(settings.always_on_top)
+    runtime.set_frosted_ui(settings.frosted_ui_enabled)
+    runtime.set_wander_enabled(
+        settings.wander_enabled,
+        settings.wander_interval_seconds,
+    )
+    runtime.set_auto_dialog(
+        settings.auto_move_dialog_chance,
+        settings.auto_move_dialog_mode,
+    )
+    runtime.set_duel_effect_enabled(settings.duel_effect_enabled)
+
+    runtime.set_role_visible("lei", settings.lei_visible)
+    runtime.set_role_visible("yu", settings.yu_visible)
+
+    for window in runtime.windows.values():
+        window.set_locked(settings.lock_position)
+        window.set_click_through(settings.click_through)
+        window.set_reduce_motion(settings.reduce_motion)
+
+    colors = {"lei": settings.stick_color_lei, "yu": settings.stick_color_yu}
+    for role, window in runtime.windows.items():
+        window.set_stick_body_ratio(settings.stick_body_ratio)
+        window.set_stick_line_width(settings.stick_line_width)
+        window.set_stick_neck_overlap(settings.stick_neck_overlap)
+        window.set_stick_color(colors.get(role, settings.stick_color_lei))
+        window.set_stick_spin_axis(settings.stick_spin_axis)
+        window.set_stick_body_enabled(settings.stick_body_enabled)
+    runtime.set_stick_action_settings(
+        settings.stick_random_action_enabled,
+        settings.stick_action_interval,
+    )
+
+    assistant = runtime.assistant
+    assistant.configure(
+        hourly=settings.hourly_chime,
+        break_minutes=settings.break_reminder_minutes,
+        focus_minutes=settings.pomodoro_focus_minutes,
+        rest_minutes=settings.pomodoro_break_minutes,
+    )
+    assistant.set_quiet_checker(
+        lambda: bool(settings.quiet_hours_enabled)
+        and in_quiet_hours(datetime.now(), settings.quiet_start, settings.quiet_end)
+    )

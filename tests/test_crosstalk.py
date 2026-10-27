@@ -1,21 +1,22 @@
 """相声模式的纯逻辑测试：角色交替、问答配对与逐句推进。"""
 
 import random
+from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 
 from leiyu_pet.crosstalk import (
-    BATTLE_END_VOLUME,
-    BATTLE_START_VOLUME,
     DEFAULT_LINES,
     LINE_PRESETS,
     CrosstalkDirector,
-    battle_multipliers,
     clamp_lines,
     commands_from_pairs,
     crosstalk_roles,
+    crosstalk_script,
 )
-from leiyu_pet.models import DialoguePair, PlaybackCommand
+from leiyu_pet.manifest import load_asset_pack
+from leiyu_pet.models import DialoguePair, PlaybackCommand, Role
 
 #: 与 conftest 的素材一致：(问, 答) = (1,2) (3,4) ... (15,16)
 PAIRS = [DialoguePair(pair_id, pair_id * 2 - 1, pair_id * 2) for pair_id in range(1, 9)]
@@ -131,23 +132,113 @@ def test_commands_from_pairs_is_deterministic_with_seeded_rng() -> None:
     assert first == second
 
 
-def test_battle_ladder_runs_from_20_to_100_percent() -> None:
-    """决战阶梯是「倍率」：首句 20%，末句正好等于用户设定音量。
-
-    倍率而不是绝对音量：绝对 20% 乘上用户 65% 的总音量只剩 13%，听上去就是没声。
-    """
-    ladder = battle_multipliers(3)
-    assert ladder[0] == pytest.approx(BATTLE_START_VOLUME)
-    assert ladder[-1] == pytest.approx(BATTLE_END_VOLUME)
-    assert ladder == sorted(ladder)
-    assert battle_multipliers(1) == [BATTLE_END_VOLUME]
-
-    for count in (2, 4, 6, 12, 20):
-        values = battle_multipliers(count)
-        assert len(values) == count
-        assert all(BATTLE_START_VOLUME <= value <= BATTLE_END_VOLUME for value in values)
 
 
-def test_battle_last_line_reaches_the_user_volume() -> None:
-    """最后一句必须能到 100%，不能像旧版那样封顶 70%。"""
-    assert battle_multipliers(20)[-1] == pytest.approx(1.0)
+@dataclass(frozen=True)
+class _Clip:
+    id: int
+    role: Role
+    duration: float
+    text: str = ""
+
+
+@dataclass(frozen=True)
+class _Pack:
+    pairs: tuple[DialoguePair, ...]
+    normal_clips: tuple[_Clip, ...]
+
+
+def _script_pack() -> _Pack:
+    """一段「两段正剧 + 两组短句副歌 + 一句收尾」的素材。"""
+    return _Pack(
+        pairs=(
+            DialoguePair(1, 1, 2),
+            DialoguePair(2, 3, 4),
+            DialoguePair(6, 11, 12),
+            DialoguePair(7, 13, 14),
+        ),
+        normal_clips=(
+            _Clip(1, "lei", 3.0),
+            _Clip(2, "yu", 4.0),
+            _Clip(3, "lei", 6.0),
+            _Clip(4, "yu", 5.0),
+            _Clip(11, "lei", 0.9),
+            _Clip(12, "yu", 0.4),
+            _Clip(13, "lei", 0.9),
+            _Clip(14, "yu", 0.4),
+            _Clip(17, "lei", 1.7, "收尾"),
+        ),
+    )
+
+
+def test_script_ends_on_the_unreferenced_punchline() -> None:
+    """最后一句必须是收尾梗（那句没有问答搭档的台词）。"""
+    script = crosstalk_script(_script_pack(), 20)
+
+    assert len(script) == 20
+    assert script[-1].clip_id == 17
+    assert script[-1].role == "lei"
+
+
+def test_script_plays_the_story_then_loops_the_short_chorus() -> None:
+    """正剧问答说完 → 「总有机会 / 追不上」来回 → 收尾。"""
+    script = crosstalk_script(_script_pack(), 20)
+
+    assert [(c.role, c.clip_id) for c in script[:4]] == [
+        ("lei", 1),
+        ("yu", 2),
+        ("lei", 3),
+        ("yu", 4),
+    ]
+    # 中段是副歌短句来回，且始终是一问一答。
+    chorus = {(11, "lei"), (12, "yu"), (13, "lei"), (14, "yu")}
+    assert {(c.clip_id, c.role) for c in script[4:19]} == chorus
+    for index in range(4, 19):
+        assert script[index].role == ("lei" if (index - 4) % 2 == 0 else "yu")
+
+
+def test_short_counts_stay_inside_the_story() -> None:
+    """句数还没到副歌段时，就只播正剧，不硬凑。"""
+    script = crosstalk_script(_script_pack(), 3)
+
+    assert [(c.role, c.clip_id) for c in script] == [("lei", 1), ("yu", 2), ("lei", 3)]
+
+
+def test_script_without_a_punchline_fills_up_with_the_chorus() -> None:
+    """素材里没有孤立台词时，副歌填满句数，不留下半截段子。"""
+    pack = _script_pack()
+    pack = _Pack(pack.pairs, tuple(c for c in pack.normal_clips if c.id != 17))
+
+    script = crosstalk_script(pack, 10)
+
+    assert len(script) == 10
+    assert all(command.clip_id != 17 for command in script)
+
+
+def test_script_without_a_chorus_repeats_the_story() -> None:
+    """素材没有短句副歌时，用正剧问答循环补齐，绝不返回半截剧本。"""
+    pack = _script_pack()
+    pack = _Pack(
+        tuple(pair for pair in pack.pairs if pair.id <= 2),
+        tuple(c for c in pack.normal_clips if c.id in (1, 2, 3, 4, 17)),
+    )
+
+    script = crosstalk_script(pack, 8)
+
+    assert len(script) == 8
+    assert script[-1].clip_id == 17
+
+
+def test_real_asset_pack_script_matches_the_intended_routine() -> None:
+    """真实素材：20 句，倒数第二句是「总有机会」，收尾是那句爆粗。"""
+    root = Path(__file__).resolve().parents[1] / "assets" / "default_pack"
+    if not root.is_dir():
+        pytest.skip("仓库素材不在，跳过剧本结构检查")
+    pack = load_asset_pack(root)
+
+    script = crosstalk_script(pack, 20)
+
+    assert len(script) == 20
+    assert pack.clip("normal", script[9].clip_id).text.startswith("发布了全新一代")
+    assert pack.clip("normal", script[-2].clip_id).text == "总有机会。"
+    assert "捣乱" in pack.clip("normal", script[-1].clip_id).text

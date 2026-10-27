@@ -17,10 +17,10 @@ from pathlib import Path
 
 DEFAULTS: dict[str, object] = {
     "version": 4,
-    "volume": 0.65,
+    "volume": 1.0,
     "distance": 32,
     "tilt_enabled": True,
-    "helium": False,
+    "helium": True,
     "include_explicit": False,
     "autostart": False,
     "click_through": False,
@@ -53,8 +53,8 @@ DEFAULTS: dict[str, object] = {
     "pomodoro_focus_minutes": 25,
     "pomodoro_break_minutes": 5,
     # 自动游走与重叠彩蛋
-    "wander_enabled": False,
-    "wander_interval_seconds": 45,
+    "wander_enabled": True,
+    "wander_interval_seconds": 30,
     "overlap_easter_egg": True,
     # 两只脸部间隙小于该像素值即视为「靠在一起」，触发自动互喷。
     "overlap_trigger_gap": 24.0,
@@ -66,13 +66,13 @@ DEFAULTS: dict[str, object] = {
     "stick_neck_overlap": 6.0,
     "stick_color_lei": "#20242b",
     "stick_color_yu": "#2a2430",
-    "stick_action_interval": 12,
+    "stick_action_interval": 8,
     # 自转轴向：flip = Y 轴翻转（默认），roll = 旧版平面滚转
     "stick_spin_axis": "flip",
     # 自动移动后按概率发起对话
-    "auto_move_dialog_chance": 0,
+    "auto_move_dialog_chance": 75,
     "auto_move_dialog_mode": "crosstalk",
-    # 对话开场的决斗特效（纯视觉，与决战模式无关）
+    # 对话开场的决斗特效（纯视觉）
     "duel_effect_enabled": True,
     "muted": False,
     # 分类磨砂：只作用于右键/托盘菜单与设置窗口（主窗口永远绝对透明）
@@ -83,10 +83,10 @@ DEFAULTS: dict[str, object] = {
 @dataclass(slots=True)
 class Config:
     version: int = 4
-    volume: float = 0.65
+    volume: float = 1.0
     distance: int = 32
     tilt_enabled: bool = True
-    helium: bool = False
+    helium: bool = True
     include_explicit: bool = False
     autostart: bool = False
     click_through: bool = False
@@ -113,8 +113,8 @@ class Config:
     break_reminder_minutes: int = 0
     pomodoro_focus_minutes: int = 25
     pomodoro_break_minutes: int = 5
-    wander_enabled: bool = False
-    wander_interval_seconds: int = 45
+    wander_enabled: bool = True
+    wander_interval_seconds: int = 30
     overlap_easter_egg: bool = True
     overlap_trigger_gap: float = 24.0
     muted: bool = False
@@ -125,9 +125,9 @@ class Config:
     stick_neck_overlap: float = 6.0
     stick_color_lei: str = "#20242b"
     stick_color_yu: str = "#2a2430"
-    stick_action_interval: int = 12
+    stick_action_interval: int = 8
     stick_spin_axis: str = "flip"
-    auto_move_dialog_chance: int = 0
+    auto_move_dialog_chance: int = 75
     auto_move_dialog_mode: str = "crosstalk"
     duel_effect_enabled: bool = True
     frosted_ui_enabled: bool = True
@@ -210,7 +210,7 @@ def _coerce(key: str, value: object) -> object:
         if key == "stick_spin_axis":
             return value if value in {"flip", "roll"} else default
         if key == "auto_move_dialog_mode":
-            return value if value in {"crosstalk", "battle", "random"} else default
+            return value if value in {"crosstalk", "random"} else default
         if key in {"stick_color_lei", "stick_color_yu"}:
             text = value if isinstance(value, str) else ""
             return text if text.startswith("#") and len(text) in {4, 7, 9} else default

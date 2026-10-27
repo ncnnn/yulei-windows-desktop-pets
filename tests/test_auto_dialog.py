@@ -43,15 +43,8 @@ def test_threshold_is_strict() -> None:
 
 def test_resolve_mode_passes_explicit_modes() -> None:
     assert resolve_mode("crosstalk") == "crosstalk"
-    assert resolve_mode("battle") == "battle"
 
 
-def test_resolve_mode_random_only_picks_real_modes() -> None:
-    rng = random.Random(1)
-    picks = {resolve_mode("random", rng) for _ in range(30)}
-    assert picks <= {"crosstalk", "battle"}
-    assert len(picks) == 2
-
-
-def test_unknown_mode_falls_back_to_random() -> None:
-    assert resolve_mode("nonsense", random.Random(2)) in {"crosstalk", "battle"}
+def test_unknown_mode_falls_back_to_crosstalk() -> None:
+    assert resolve_mode("nonsense", random.Random(2)) == "crosstalk"
+    assert resolve_mode("battle", random.Random(2)) == "crosstalk"

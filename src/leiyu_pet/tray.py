@@ -19,7 +19,6 @@ VOLUMES = (0, 25, 50, 65, 80, 100)
 #: 托盘悬浮提示里显示的播放模式。
 MODE_LABELS = {
     "crosstalk": "相声中",
-    "battle": "决战中",
     "pair": "对话中",
     "solo": "播放中",
 }
@@ -53,7 +52,7 @@ class TrayManager(QObject):
         self._menu.aboutToShow.connect(self._sync_checks)
 
         self._tray.activated.connect(self._on_activated)
-        # 播放模式变化时更新悬浮提示（决战/相声中一眼可见）。
+        # 播放模式变化时更新悬浮提示（相声中一眼可见）。
         mode_signal = getattr(getattr(runtime, "controller", None), "mode_changed", None)
         if mode_signal is not None:
             mode_signal.connect(self._on_mode_changed)
@@ -181,7 +180,6 @@ class TrayManager(QObject):
             )
         lines = int(rt.controller.crosstalk_lines)
         self._add_action(self._menu, f"相声模式 · {lines} 句", self._start_crosstalk)
-        self._add_action(self._menu, f"决战模式 · {lines} 句", self._start_battle)
         self._menu.addSeparator()
 
         voice_menu = frosted_ui.submenu(self._menu, "声音模式")
@@ -244,13 +242,6 @@ class TrayManager(QObject):
             return
         self.runtime.show_all()
         self.runtime.controller.start_crosstalk()
-
-    def _start_battle(self) -> None:
-        """决战模式和相声同一套问答节奏，只是音量逐句爬升。"""
-        if self.runtime.controller.start_battle():
-            return
-        self.runtime.show_all()
-        self.runtime.controller.start_battle()
 
     def _start_pomodoro(self) -> None:
         assistant = getattr(self.runtime, "assistant", None)

@@ -315,14 +315,13 @@ def test_auto_dialog_uses_the_configured_mode(asset_pack_factory) -> None:
     runtime = _build_visible_runtime(asset_pack_factory)
     calls: list[str] = []
     try:
-        runtime.controller.start_battle = lambda lines=None: calls.append("battle") or True
         runtime.controller.start_crosstalk = lambda lines=None: calls.append("crosstalk") or True
-        runtime.set_auto_dialog(100, "battle")
+        runtime.set_auto_dialog(100, "crosstalk")
         runtime._last_auto_dialog_at = 0.0
 
         runtime._maybe_auto_dialog()
 
-        assert calls == ["battle"]
+        assert calls == ["crosstalk"]
     finally:
         runtime.close()
 
@@ -331,7 +330,6 @@ def test_auto_dialog_respects_zero_chance_and_cooldown(asset_pack_factory) -> No
     runtime = _build_visible_runtime(asset_pack_factory)
     calls: list[str] = []
     try:
-        runtime.controller.start_battle = lambda lines=None: calls.append("battle") or True
         runtime.controller.start_crosstalk = lambda lines=None: calls.append("crosstalk") or True
 
         runtime.set_auto_dialog(0, "crosstalk")
@@ -405,7 +403,6 @@ def test_context_menu_exposes_action_submenu(asset_pack_factory) -> None:
         menu = runtime.menu_manager.show("lei", QPoint(5, 5))
         texts = [action.text() for action in menu.actions()]
         assert "相声模式 · 20 句" in texts
-        assert "决战模式 · 20 句" in texts
         for legacy in ("最近说过", "两人对话一句", "磨砂菜单与设置", "歪头距离", "人物大小"):
             assert legacy not in texts
         action_menu = next(

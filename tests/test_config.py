@@ -172,8 +172,14 @@ def test_zero_interval_disables_random_actions(tmp_path: Path) -> None:
 
 
 def test_auto_dialog_and_duel_defaults() -> None:
+    """出厂默认：氦气音色、自动溜达、移动后 75% 概率开聊。"""
     config = Config()
-    assert config.auto_move_dialog_chance == 0
+    assert config.helium is True
+    assert config.wander_enabled is True
+    assert config.wander_interval_seconds == 30
+    assert config.stick_action_interval == 8
+    assert config.crosstalk_lines == 20
+    assert config.auto_move_dialog_chance == 75
     assert config.auto_move_dialog_mode == "crosstalk"
     assert config.duel_effect_enabled is True
 

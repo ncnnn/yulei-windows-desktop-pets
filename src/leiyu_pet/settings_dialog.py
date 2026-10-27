@@ -41,13 +41,14 @@ from PySide6.QtWidgets import (
 from . import APP_NAME, __version__, frosted_ui, paths
 from .auto_dialog import CHANCE_LABELS, DIALOG_CHANCES, DIALOG_MODES, MODE_LABELS
 from .autostart import is_enabled, set_enabled
-from .config import Config, save_config
+from .config import DEFAULTS, Config, save_config
 from .context_menu import ROLE_NAMES
 from .crosstalk import LINE_PRESETS
 from .hotkeys import ACTION_LABELS, DEFAULT_BINDINGS, describe_binding
 from .pomodoro import BREAK_PRESETS as POMODORO_BREAKS
 from .pomodoro import FOCUS_PRESETS
 from .reminders import BREAK_PRESETS
+from .runtime import apply_config
 
 ROLES = ("lei", "yu")
 DISTANCES = ((8, "贴近"), (32, "靠近"), (80, "较远"))
@@ -670,6 +671,12 @@ class SettingsDialog(QDialog):
         reset_button.setAutoDefault(False)
         reset_button.clicked.connect(self._reset_positions)
         window_form.addRow(self._left_aligned(reset_button))
+
+        defaults_button = QPushButton("恢复全部默认设置")
+        defaults_button.setObjectName("inline_action")
+        defaults_button.setAutoDefault(False)
+        defaults_button.clicked.connect(self._reset_all_defaults)
+        window_form.addRow(self._left_aligned(defaults_button))
         layout.addWidget(window_group)
 
         quiet_group = QGroupBox("免打扰时段")
@@ -781,16 +788,13 @@ class SettingsDialog(QDialog):
         self._persist()
 
     def _refresh_volume_hint(self, percent: int) -> None:
-        """音量偏低时说明决战模式的起步会显得更轻，避免被当成「没声音」。"""
+        """音量偏低时提醒一下，避免被当成「没声音」。"""
         if percent < 20:
             self.volume_hint.setText(
-                "⚠ 当前音量偏低：决战模式从 20% 起步，在轻声下几乎听不出来，"
-                "建议调到 50% 以上。"
+                "⚠ 当前音量偏低，轻声环境下可能听不太清，建议调到 50% 以上。"
             )
         else:
-            self.volume_hint.setText(
-                "决战模式会在你设定的音量内，由 20% 逐句渐强到 100%。"
-            )
+            self.volume_hint.setText("音量按你的设置播放；氦气版会显得更清脆一些。")
 
     def _set_voice(self, mode: str) -> None:
         self.runtime.controller.set_voice_mode(mode)
@@ -1044,3 +1048,40 @@ class SettingsDialog(QDialog):
         self.config.lei_pos = []
         self.config.yu_pos = []
         self._persist()
+
+    def _reset_all_defaults(self) -> None:
+        """把每一项都改回出厂值并立刻生效。
+
+        升级后旧配置会保留你上次的选择，新默认值不会自动覆盖；想整套换新的
+        时候点这里就行，不用手动删配置文件。
+        """
+        for key, value in DEFAULTS.items():
+            if key == "version":
+                continue
+            setattr(self.config, key, list(value) if isinstance(value, list) else value)
+        apply_config(self.runtime, self.config)
+        self._persist()
+        self._sync_controls()
+        self.runtime.controller.notice.emit("已恢复全部默认设置")
+
+    def _sync_controls(self) -> None:
+        """把控件按当前配置重填一遍（恢复默认值后界面要跟着变）。"""
+        for combo in self.findChildren(QComboBox):
+            value = getattr(self.config, combo.objectName(), None)
+            if value is None:
+                continue
+            index = combo.findData(value)
+            if index >= 0:
+                combo.setCurrentIndex(index)
+        for box in self.findChildren(QCheckBox):
+            value = getattr(self.config, box.objectName(), None)
+            if value is not None:
+                box.setChecked(bool(value))
+        for slider in self.findChildren(QSlider):
+            value = getattr(self.config, slider.objectName(), None)
+            if value is None:
+                continue
+            number = float(value)
+            # 音量这类是 0-1 的小数，滑块却是 0-100 的整数刻度。
+            scale = slider.maximum() if number <= 1.0 and slider.maximum() > 1 else 1
+            slider.setValue(int(round(number * scale)))

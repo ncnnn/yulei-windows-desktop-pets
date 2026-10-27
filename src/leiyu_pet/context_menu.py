@@ -36,7 +36,6 @@ class ContextMenuManager(QObject):
 
         self._add_action(menu, "随机说一段", partial(controller.play_solo, role))
         self._add_action(menu, f"相声模式 · {lines} 句", self._start_crosstalk)
-        self._add_action(menu, f"决战模式 · {lines} 句", self._start_battle)
 
         pick_menu = frosted_ui.submenu(menu, "挑一段")
         for clip in self.runtime.pack.clips_for(
@@ -104,12 +103,6 @@ class ContextMenuManager(QObject):
             return
         self.runtime.show_all()
         self.runtime.controller.start_crosstalk()
-
-    def _start_battle(self) -> None:
-        if self.runtime.controller.start_battle():
-            return
-        self.runtime.show_all()
-        self.runtime.controller.start_battle()
 
     def _play_action(self, role: Role, state: str) -> None:
         window = self.runtime.windows[role]

@@ -3,14 +3,13 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-import pytest
 from PySide6.QtCore import QObject, Signal
+from PySide6.QtTest import QTest
 
 from leiyu_pet.manifest import load_asset_pack
 from leiyu_pet.models import Role
 from leiyu_pet.pet_controller import (
     MUTED_LINE,
-    MUTED_RELEASE_HINT,
     PetController,
 )
 from leiyu_pet.proximity import Rect
@@ -93,6 +92,8 @@ def build_controller(asset_pack_factory: Callable[..., Path], *, overlap: bool =
     # 「叠在一起自动互喷」默认开启；这两只默认就挨着，会自己开聊，
     # 干扰其它用例的播放序列，所以夹具里默认关掉、需要时再打开。
     controller.set_overlap_easter_egg(overlap)
+    # 句间停顿是给人听的，测试里要同步推进，否则断言会跑在定时器之前。
+    controller._line_gap_ms = 0
     return controller, windows, audio
 
 
@@ -370,85 +371,6 @@ def test_overlap_cooldown_is_not_consumed_on_failure(asset_pack_factory) -> None
     assert audio.calls and audio.calls[0][0] == "lei"
 
 
-def test_battle_rises_volume_and_restores(asset_pack_factory) -> None:
-    controller, _windows, audio = build_controller(asset_pack_factory)
-    volumes: list[float] = []
-    audio.set_volume = volumes.append  # type: ignore[method-assign]
-    controller.set_volume(1.0)
-    volumes.clear()
-
-    assert controller.start_battle(4) is True
-    assert controller.mode == "battle"
-    assert volumes == [pytest.approx(0.2)]
-
-    for _ in range(4):
-        role, clip_id, _path = audio.calls[-1]
-        audio.is_playing = False
-        audio.finished.emit(role, clip_id)
-
-    assert volumes == [pytest.approx(v) for v in (0.2, 0.467, 0.733, 1.0)]
-    assert controller.mode == "idle"
-
-
-def test_battle_never_exceeds_user_volume(asset_pack_factory) -> None:
-    controller, _windows, audio = build_controller(asset_pack_factory)
-    volumes: list[float] = []
-    audio.set_volume = volumes.append  # type: ignore[method-assign]
-    controller.set_volume(0.3)
-    volumes.clear()
-    notices: list[str] = []
-    controller.notice.connect(notices.append)
-
-    controller.start_battle(4)
-
-    assert volumes == [pytest.approx(0.06)]
-    role, clip_id, _path = audio.calls[-1]
-    audio.is_playing = False
-    audio.finished.emit(role, clip_id)
-    assert volumes[-1] == pytest.approx(0.1401, abs=1e-3)
-    assert all(value <= 0.3 + 1e-9 for value in volumes)
-    # 30% 高于 20% 的起点，无需提示；整段仍然只在用户音量之内。
-    assert notices == []
-
-
-def test_battle_follows_volume_change_mid_playback(asset_pack_factory) -> None:
-    """渐强播放中拖音量滑块，应当立刻按当前倍率跟着变。"""
-    controller, _windows, audio = build_controller(asset_pack_factory)
-    volumes: list[float] = []
-    audio.set_volume = volumes.append  # type: ignore[method-assign]
-    controller.set_volume(0.5)
-    volumes.clear()
-
-    controller.start_battle(4)
-    assert volumes == [pytest.approx(0.1)]
-
-    controller.set_volume(0.8)
-    assert volumes[-1] == pytest.approx(0.16)
-
-
-def test_battle_hints_when_volume_below_ladder(asset_pack_factory) -> None:
-    controller, _windows, audio = build_controller(asset_pack_factory)
-    notices: list[str] = []
-    controller.notice.connect(notices.append)
-    controller.set_volume(0.1)
-
-    controller.start_battle(4)
-
-    assert notices and "20%" in notices[0]
-
-
-def test_battle_and_crosstalk_are_mutually_exclusive(asset_pack_factory) -> None:
-    controller, _windows, audio = build_controller(asset_pack_factory)
-    controller.set_volume(1.0)
-
-    assert controller.start_crosstalk(4) is True
-    assert controller.mode == "crosstalk"
-
-    assert controller.start_battle(4) is True
-    assert controller.mode == "battle"
-    assert controller.crosstalk.position == 1  # 序列已换成决战的新序列
-
-
 def test_crosstalk_uses_paired_questions_and_answers(asset_pack_factory) -> None:
     """角色交替之外，内容也必须成对：lei 问 1，yu 就答 2。"""
     controller, _windows, audio = build_controller(asset_pack_factory)
@@ -510,17 +432,16 @@ def test_muted_click_only_shows_the_banned_line(asset_pack_factory) -> None:
 
 
 def test_muted_blocks_every_dialogue_and_asks_for_release(asset_pack_factory) -> None:
-    """捂嘴期间相声/决战/对话都被挡下，并弹出「快把我放出来」。"""
+    """捂嘴期间相声/对话都被挡下，统一只回禁言那句。"""
     controller, windows, audio = build_controller(asset_pack_factory)
 
     controller.set_muted(True)
     assert controller.start_crosstalk(4) is False
-    assert controller.start_battle(4) is False
     assert controller.start_pair() is False
     assert controller.play_solo("lei") is None
     assert audio.calls == []
-    assert windows["lei"].caption == MUTED_RELEASE_HINT
-    assert windows["yu"].caption == MUTED_RELEASE_HINT
+    assert windows["lei"].caption == MUTED_LINE
+    assert windows["yu"].caption == MUTED_LINE
 
 
 def test_muted_blocks_animations_too(asset_pack_factory) -> None:
@@ -531,7 +452,7 @@ def test_muted_blocks_animations_too(asset_pack_factory) -> None:
     controller.handle_double_click("lei")
 
     assert windows["lei"].spun == 0
-    assert windows["lei"].caption == MUTED_RELEASE_HINT
+    assert windows["lei"].caption == MUTED_LINE
 
 
 def test_muted_paints_and_clears_the_hand(asset_pack_factory) -> None:
@@ -557,4 +478,41 @@ def test_muted_suppresses_the_overlap_easter_egg(asset_pack_factory) -> None:
     controller.update_proximity()
 
     assert audio.calls == []
-    assert windows["lei"].caption == MUTED_RELEASE_HINT
+    assert windows["lei"].caption == MUTED_LINE
+
+
+def test_lines_keep_a_gap_so_short_lines_are_audible(asset_pack_factory, qapp) -> None:
+    """每句之间留一口气：氦气版短句只有 0.2 秒，挨着播会听不出个数。"""
+    controller, _windows, audio = build_controller(asset_pack_factory)
+    controller._line_gap_ms = 200
+
+    controller.start_crosstalk(6)
+    role, clip_id, _path = audio.calls[-1]
+    audio.finished.emit(role, clip_id)
+
+    assert len(audio.calls) == 1  # 停顿期间还没接下一句
+    QTest.qWait(320)
+    assert len(audio.calls) == 2
+
+
+def test_short_lines_keep_their_bubble_on_screen(asset_pack_factory) -> None:
+    """短句的气泡至少停留一小会儿，别一闪而过。"""
+    controller, _windows, _audio = build_controller(asset_pack_factory)
+
+    class ShortClip:
+        duration = 0.3
+
+    class ShortPack:
+        def clip(self, _mode: str, _clip_id: int) -> ShortClip:
+            return ShortClip()
+
+    controller.pack = ShortPack()  # type: ignore[assignment]
+
+    assert controller._caption_hold_ms(1) >= 800
+
+
+def test_caption_hold_falls_back_when_clip_is_missing(asset_pack_factory) -> None:
+    """取不到片段信息时按停顿时长兜底，不能返回 0 让气泡瞬间消失。"""
+    controller, _windows, _audio = build_controller(asset_pack_factory)
+
+    assert controller._caption_hold_ms(9999) >= 1

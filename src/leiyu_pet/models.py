@@ -49,7 +49,7 @@ class PlaybackCommand:
     role: Role
     clip_id: int
     #: 只对这一句生效的音量**倍率**（0.0-1.0，1.0 = 用户设置的总音量）；
-    #: ``None`` 表示不覆盖。决战模式用它做 55%→100% 的逐句爬升。
+    #: ``None`` 表示不覆盖。
     volume: float | None = None
 
 

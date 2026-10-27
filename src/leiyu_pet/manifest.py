@@ -241,30 +241,6 @@ def load_asset_pack(root: Path | str) -> AssetPack:
 
     if issues:
         raise AssetValidationError(issues)
-    return AssetPack(root, normal, helium, _dedupe_pairs(pairs, normal_by_id))
-
-
-def _dedupe_pairs(
-    pairs: tuple[DialoguePair, ...],
-    clips_by_id: dict[int, Clip],
-) -> tuple[DialoguePair, ...]:
-    """按台词文本合并重复的问答组。
-
-    素材里同一个梗常被拆成好几个 id（例如「总有机会 / 追不上」占了 3 组），
-    20 句相声就会连着重复同一对，听起来像卡带。这里按 (雷军台词, 余承东台词)
-    只保留第一次出现的组；全部去重后为空时原样返回，保证至少还能播。
-    """
-    seen: set[tuple[str, str]] = set()
-    result: list[DialoguePair] = []
-    for pair in pairs:
-        lei = clips_by_id.get(pair.lei)
-        yu = clips_by_id.get(pair.yu)
-        key = (
-            lei.text if lei is not None else str(pair.lei),
-            yu.text if yu is not None else str(pair.yu),
-        )
-        if key in seen:
-            continue
-        seen.add(key)
-        result.append(pair)
-    return tuple(result) or pairs
+    # 不去重：相声剧本自己会区分正剧、副歌与收尾句（见 crosstalk.crosstalk_script），
+    # 「总有机会 / 追不上」那几组就是故意留着轮换用的。
+    return AssetPack(root, normal, helium, pairs)

@@ -251,12 +251,6 @@ class AudioCoordinator(QObject):
             self._player.play()
             self._watchdog.start()
             return
-        if name in _PENDING_START_STATES and not self._retried:
-            # 媒体已加载却没起步：补一次 play，把被吞掉的那一句救回来。
-            self._retried = True
-            self._player.play()
-            self._watchdog.start()
-            return
         if name in ("LoadingMedia", *_PENDING_START_STATES) and self._grace > 0:
             # 还在加载：再宽限一轮，别把「机器慢」误判成「没有后端」。
             self._grace -= 1

@@ -12,13 +12,11 @@ from typing import Protocol, cast
 from PySide6.QtCore import QObject, QTimer, Signal
 
 from .crosstalk import (
-    BATTLE_HINT_VOLUME,
     DEFAULT_LINES,
     CrosstalkDirector,
-    battle_multipliers,
     clamp_lines,
-    commands_from_pairs,
     crosstalk_roles,
+    crosstalk_script,
 )
 from .dialogue import DialogueController
 from .models import AssetPack, PlaybackCommand, Role, VoiceMode
@@ -34,17 +32,22 @@ OVERLAP_THRESHOLD = 0.55
 OVERLAP_COOLDOWN_SECONDS = 12.0
 #: 打开后把每次互喷判定写入日志（默认静默），用于现场排障。
 OVERLAP_DEBUG_ENV = "LEIYU_DEBUG_OVERLAP"
-#: 试图做被禁的事情时改成求救——让「为什么没反应」有明确出口。
 #: 捂嘴（禁言）模式的两句台词：点击时只回「已被禁言」，
 #: 试图做被禁的事情时改成求救——让「为什么没反应」有明确出口。
+#: 捂嘴（禁言）期间的唯一台词：不管是被点击、被点播、被拖到一起互喷，
+#: 都只回这一句——统一口径，用户一眼就知道「它被禁言了」。
 MUTED_LINE = "该用户因违反社区友善规范已被禁言"
-MUTED_RELEASE_HINT = "关闭捂嘴模式，快把我放出来"
-#: 捂嘴期间被拖到一起时，「快把我放出来」的重播冷却（秒）。
+#: 这句提示的重播冷却（秒）：避免拖动时一直刷同一句话。
+#: 捂嘴期间被拖到一起时的重播冷却（秒）。
 MUTED_HINT_COOLDOWN_SECONDS = 10.0
-OVERLAP_DEBUG_ENV = "LEIYU_DEBUG_OVERLAP"
 HISTORY_LIMIT = 8
+#: 连续台词之间的停顿（毫秒）。氦气版是加速的，短句只有 0.2-0.3 秒，
+#: 挨着播会连成一片、听不出个数，后端也来不及缓冲；留一口气才听得清。
+LINE_GAP_MS = 260
+#: 台词气泡的最短停留时间（秒）：短句也别一闪而过。
+MIN_CAPTION_SECONDS = 1.2
 
-Mode = str  # "idle" | "solo" | "pair" | "crosstalk" | "battle"
+Mode = str  # "idle" | "solo" | "pair" | "crosstalk"
 
 logger = logging.getLogger(__name__)
 
@@ -66,9 +69,9 @@ class PetWindowPort(Protocol):
 class PetController(QObject):
     playback_error = Signal(str)
     notice = Signal(str)
-    #: 播放模式变化："idle"/"solo"/"pair"/"crosstalk"/"battle"，供托盘更新图标。
+    #: 播放模式变化："idle"/"solo"/"pair"/"crosstalk"，供托盘更新图标。
     mode_changed = Signal(str)
-    #: 一段「对话」开场（pair/crosstalk/battle），供决斗特效使用；独白不触发。
+    #: 一段「对话」开场（pair/crosstalk），供决斗特效使用；独白不触发。
     conversation_started = Signal(str)
 
     def __init__(
@@ -92,11 +95,8 @@ class PetController(QObject):
         self.crosstalk = CrosstalkDirector()
         self.crosstalk_lines = DEFAULT_LINES
         self.playback_rate = 1.0
-        #: 用户设置的总音量；决战模式的逐句音量不会超过它。
+        #: 用户设置的总音量。
         self.base_volume = 0.65
-        #: 当前这句相对总音量的倍率（1.0 = 不覆盖），播放中调音量要按它重算。
-        self._volume_factor = 1.0
-        self._volume_overridden = False
         #: 常驻状态气泡（番茄钟倒计时），说话时让位给台词。
         self._status_role: Role | None = None
         self._status_text = ""
@@ -115,7 +115,9 @@ class PetController(QObject):
         self._last_overlap_at = 0.0
         self._last_overlap_log_at = 0.0
         self._last_muted_hint_at = 0.0
-        #: 当前播放模式；决战与相声互斥，切换时先完整退出旧模式。
+        #: 台词之间的停顿；测试里可以调成 0 让推进变成同步的。
+        self._line_gap_ms = LINE_GAP_MS
+        #: 当前播放模式。
         self.mode: Mode = "idle"
         self._rebuild_solo_bags()
 
@@ -283,7 +285,7 @@ class PetController(QObject):
 
     def _muted_refuse(self, role: Role | None = None) -> None:
         """捂嘴期间被要求发声或做动作：只弹一句求救，不真的执行。"""
-        self._show_muted_hint(MUTED_RELEASE_HINT, role)
+        self._show_muted_hint(MUTED_LINE, role)
 
     def _show_muted_hint(self, text: str, role: Role | None = None) -> None:
         targets = [role] if role in self.windows else list(self.windows)
@@ -364,7 +366,7 @@ class PetController(QObject):
         self._execute(PlaybackCommand(role, selected))
 
     def _enter_mode(self, mode: Mode) -> None:
-        """切换播放模式；决战与相声互斥，先完整退出旧模式。"""
+        """切换播放模式；不同模式互斥，先完整退出旧模式。"""
         if self.mode == mode:
             return
         self._leave_mode()
@@ -373,8 +375,8 @@ class PetController(QObject):
 
     def _leave_mode(self) -> None:
         """按「音量 → 气泡 → 模式状态 → 界面通知」的顺序还原。"""
-        # 1) 音量还原（决战模式的逐句音量回到用户设置的总音量）
-        self._restore_volume()
+        # 1) 音量还原
+        self.audio.set_volume(self.base_volume)
         # 2) 气泡还原（番茄钟等常驻状态重新显示）
         self._reapply_status()
         # 3) 模式状态清除
@@ -404,7 +406,7 @@ class PetController(QObject):
         if not self.both_visible():
             return False
         total = clamp_lines(self.crosstalk_lines if lines is None else lines)
-        commands = self._pair_commands(total)
+        commands = self._crosstalk_commands(total)
         if lead == "yu":
             commands = [
                 PlaybackCommand(
@@ -420,40 +422,10 @@ class PetController(QObject):
         self._execute(self.crosstalk.start(commands))
         return True
 
-    def start_battle(self, lines: int | None = None) -> bool:
-        """决战模式：同样是相声的问答节奏，每句音量从 20% 渐强到 100%。
-
-        音量按「相对用户设置」的倍率处理：用户把总音量调到 30%，整段都会跟着
-        变轻但仍有渐强；静音状态下依然保持静音。
-        """
-        if self.muted:
-            self._muted_refuse()
-            return False
-        if not self.both_visible():
-            return False
-        total = clamp_lines(self.crosstalk_lines if lines is None else lines)
-        commands = self._pair_commands(total)
-        volumes = battle_multipliers(len(commands))
-        staggered = [
-            PlaybackCommand(command.role, command.clip_id, volume)
-            for command, volume in zip(commands, volumes, strict=True)
-        ]
-        if self.base_volume < BATTLE_HINT_VOLUME - 1e-9:
-            self.notice.emit(
-                f"当前音量 {round(self.base_volume * 100)}%，"
-                f"决战模式从 20% 起步会显得更轻，建议调到 "
-                f"{round(BATTLE_HINT_VOLUME * 100)}% 以上"
-            )
-        self.dialogue.cancel()
-        self._enter_mode("battle")
-        self.conversation_started.emit("battle")
-        self._execute(self.crosstalk.start(staggered))
-        return True
-
-    def _pair_commands(self, total: int) -> list[PlaybackCommand]:
-        """取问答组生成交替命令；素材缺问答对时退回各自的随机袋。"""
+    def _crosstalk_commands(self, total: int) -> list[PlaybackCommand]:
+        """相声按素材剧本排布；素材缺问答组时退回「各说各的」随机袋。"""
         try:
-            return commands_from_pairs(self.pack.pairs, total)
+            return crosstalk_script(self.pack, total)
         except ValueError:
             roles = crosstalk_roles(total)
             return [
@@ -500,30 +472,7 @@ class PetController(QObject):
     def _execute(self, command: PlaybackCommand) -> None:
         clip = self.pack.clip(self.voice_mode, command.clip_id)
         path = self.pack.audio_path(self.voice_mode, clip)
-        self._apply_command_volume(command.volume)
         self.audio.play(command.role, clip, path)
-
-    def _apply_command_volume(self, factor: float | None) -> None:
-        """应用本句音量倍率；None 表示回到用户设置的总音量。
-
-        ``factor`` 是**相对倍率**（1.0 = 原样），不是绝对音量：这样保证任何
-        模式都不会比用户设定的音量更吵，也不会因为用户音量本来就低而把
-        第一句压成 13% 那种听不见的水平。
-        """
-        if factor is None or factor >= 0.999:
-            self._restore_volume()
-            return
-        target = max(0.0, min(float(factor), 1.0))
-        self._volume_factor = target
-        self.audio.set_volume(self.base_volume * target)
-        self._volume_overridden = True
-
-    def _restore_volume(self) -> None:
-        self._volume_factor = 1.0
-        if not self._volume_overridden:
-            return
-        self.audio.set_volume(self.base_volume)
-        self._volume_overridden = False
 
     def set_status(self, role: Role, text: str) -> bool:
         """常驻状态条（番茄钟倒计时等）。
@@ -592,11 +541,7 @@ class PetController(QObject):
 
     def set_volume(self, volume: float) -> None:
         self.base_volume = min(max(float(volume), 0.0), 1.0)
-        if self._volume_overridden:
-            # 决战/渐强播放中拖动滑块：立刻按当前倍率跟着变，而不是等下一句。
-            self.audio.set_volume(self.base_volume * self._volume_factor)
-        else:
-            self.audio.set_volume(self.base_volume)
+        self.audio.set_volume(self.base_volume)
 
     def set_rate(self, rate: float) -> None:
         self.playback_rate = min(max(float(rate), 0.5), 2.0)
@@ -635,11 +580,36 @@ class PetController(QObject):
         if next_command is None:
             next_command = self.dialogue.finished(typed_role, clip_id)
         if next_command is not None:
-            self._execute(next_command)
+            self._queue_next(next_command, generation)
             return
-        # 整段（含决战模式的音量阶梯）结束：按既定顺序还原。
+        # 整段结束：按既定顺序还原。
         self._leave_mode()
-        QTimer.singleShot(400, clear_if_still_current)
+        QTimer.singleShot(self._caption_hold_ms(clip_id), clear_if_still_current)
+
+    def _queue_next(self, command: PlaybackCommand, generation: int) -> None:
+        """下一句之间留一口气，别把短句吞掉。
+
+        氦气版是加速的，「追不上」只有 0.24 秒；挨着播会连成一片、听不出个数，
+        后端也来不及缓冲（偶发吞掉 play）。留出停顿后每一句都听得清。
+        """
+        if self._line_gap_ms <= 0:
+            self._execute(command)
+            return
+
+        def run() -> None:
+            if generation == self._generation:
+                self._execute(command)
+
+        QTimer.singleShot(self._line_gap_ms, run)
+
+    def _caption_hold_ms(self, clip_id: int) -> int:
+        """短句的气泡至少停留 ``MIN_CAPTION_SECONDS``，别一闪而过。"""
+        try:
+            clip = self.pack.clip(self.voice_mode, clip_id)
+        except KeyError:
+            return max(self._line_gap_ms, LINE_GAP_MS)
+        remaining = MIN_CAPTION_SECONDS - float(getattr(clip, "duration", 0.0))
+        return max(self._line_gap_ms, LINE_GAP_MS, int(remaining * 1000))
 
     def _on_audio_stopped(self) -> None:
         for window in self.windows.values():
