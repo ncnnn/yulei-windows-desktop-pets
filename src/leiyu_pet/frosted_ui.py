@@ -96,6 +96,10 @@ QMenu {
     min-width: 210px;
 }
 QMenu::item {
+    /* min-width 必须给：只写 padding 时 QStyle 只按文字宽度算 item 矩形，
+       菜单却被 QMenu 的 min-width 撑宽，右侧会留出一条「看得见、点不到」的死区
+       （实测 222px 宽的菜单里 item 只有 114px）。 */
+    min-width: 180px;
     padding: 6px 26px 6px 10px;
     border-radius: 8px;
 }

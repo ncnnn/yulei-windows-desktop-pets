@@ -25,7 +25,7 @@ from leiyu_pet.animation import (
 )
 from leiyu_pet.caption_widget import PADDING, CaptionWidget
 from leiyu_pet.pet_window import BOTTOM_EXTRA, PAD_X, STATUS_HEIGHT, TOP, PetWindow
-from leiyu_pet.platform_win import HTTRANSPARENT
+from leiyu_pet.platform_win import HTCLIENT, HTTRANSPARENT
 
 # 必须在 QApplication 创建之前生效：无显示环境下使用 offscreen 插件，避免弹出可见窗口。
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -668,9 +668,10 @@ def test_nchittest_passes_through_empty_pixels(pet: PetWindow) -> None:
 
 
 def test_nchittest_keeps_events_on_the_head(pet: PetWindow) -> None:
+    """命中必须回 HTCLIENT：返回 0（HTNOWHERE）会让整只桌宠点不动、拖不动。"""
     handled, result = nchittest(pet, center_point(pet))
-    assert handled is False
-    assert result == 0
+    assert handled is True
+    assert result == HTCLIENT
 
 
 def test_nchittest_keeps_events_on_stick_limbs(pet: PetWindow) -> None:
@@ -685,7 +686,8 @@ def test_nchittest_keeps_events_on_stick_limbs(pet: PetWindow) -> None:
     )
     assert pet.hit_test(mid) is True
     handled, result = nchittest(pet, mid)
-    assert handled is False
+    assert handled is True
+    assert result == HTCLIENT
 
 
 def test_nchittest_ignores_other_messages(pet: PetWindow) -> None:

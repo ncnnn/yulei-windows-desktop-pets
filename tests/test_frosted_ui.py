@@ -154,6 +154,27 @@ def test_frosted_menu_sets_plan_and_paints(qapp, icon_dir, painted_plan) -> None
     menu.deleteLater()
 
 
+def test_menu_items_fill_the_menu_width(qapp, icon_dir, painted_plan) -> None:
+    """菜单项必须撑满菜单宽度，否则右侧是「看得见点不到」的死区。
+
+    回归背景：只写 padding 时 item 矩形只有 114px，菜单却被撑到 222px，
+    声音模式、音量这类短项的右半边点不到。
+    """
+    menu = frosted_ui.FrostedMenu()
+    frosted_ui.apply_menu(menu, painted_plan)
+    menu.addAction("短项")
+    menu.addAction("很长很长的一个菜单项文字")
+    menu.show()
+    qapp.processEvents()
+    try:
+        for action in menu.actions():
+            rect = menu.actionGeometry(action)
+            assert rect.width() >= menu.width() - 20
+    finally:
+        menu.close()
+        menu.deleteLater()
+
+
 def test_chevron_style_handles_degenerate_rects(qapp) -> None:
     """箭头绘制不能因为矩形为空就崩（布局未完成时会传空 rect）。"""
     image = QImage(20, 20, QImage.Format.Format_ARGB32)

@@ -15,12 +15,15 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QObject, QTimer, QUrl, Signal
 
 from .models import Clip, Role
+
+LOGGER = logging.getLogger(__name__)
 
 _END_OF_MEDIA = "EndOfMedia"
 _START_TIMEOUT_MS = 2500
@@ -43,6 +46,17 @@ def _create_output() -> Any:
     from PySide6.QtMultimedia import QAudioOutput
 
     return QAudioOutput()
+
+
+def output_device_name() -> str:
+    """默认播放设备名；拿不到时返回空串（QMediaDevices 延迟导入，避免测试加载插件）。"""
+    try:
+        from PySide6.QtMultimedia import QMediaDevices
+
+        device = QMediaDevices.defaultAudioOutput()
+        return device.description() or ""
+    except Exception:  # noqa: BLE001 - 缺少多媒体后端时任何异常都只影响诊断
+        return ""
 
 
 class AudioCoordinator(QObject):
@@ -70,6 +84,7 @@ class AudioCoordinator(QObject):
         self._clip_id: int | None = None
         self._playing = False
         self._grace = 0
+        self._retried = False
         self._token = 0
         self._hooks: list[tuple[Any, Any]] = []
         self._watchdog = QTimer(self)
@@ -94,14 +109,13 @@ class AudioCoordinator(QObject):
         token = self._token
         clip_id = clip.id
         self._grace = _MAX_GRACE
-        retries = 0
+        self._retried = False
 
         def on_position(milliseconds: int) -> None:
             if token == self._token:
                 self.position_changed.emit(role, clip_id, milliseconds / 1000.0)
 
         def on_status(status: Any) -> None:
-            nonlocal retries
             name = getattr(status, "name", "")
             if token != self._token:
                 return
@@ -111,14 +125,12 @@ class AudioCoordinator(QObject):
                 return
             if not name or name == "NoMedia":
                 return
-            # 后端已接手：真正的播放中才停掉兜底计时。
+            # 后端已经真的在播：停掉兜底计时。
+            # 这里**不再**在 LoadedMedia/BufferedMedia 时补 play()——那一瞬间
+            # playbackState 往往还是 StoppedState，连发 play 会把刚起来的播放
+            # 重置，反而造成「有气泡没声音」。补播统一交给 watchdog 判定。
             if self._is_playing() or self._position() > 0:
                 self._watchdog.stop()
-                return
-            if name in _PENDING_START_STATES and retries < _MAX_PLAY_RETRIES:
-                # 已加载但没有播放态：补一次 play，把被吞掉的那一句救回来。
-                retries += 1
-                self._player.play()
 
         def on_error(error: Any, message: str) -> None:
             if token != self._token:
@@ -139,6 +151,9 @@ class AudioCoordinator(QObject):
 
         self._player.setSource(QUrl.fromLocalFile(str(path)))
         self._player.play()
+        LOGGER.debug(
+            "播放 %s#%s 音量=%.2f 文件=%s", role, clip_id, self.volume, Path(path).name
+        )
         self._watchdog.start()
         self.started.emit(role, clip_id)
 
@@ -160,6 +175,22 @@ class AudioCoordinator(QObject):
         set_rate = getattr(self._player, "setPlaybackRate", None)
         if callable(set_rate):
             set_rate(clamped)
+
+    @property
+    def volume(self) -> float:
+        """当前输出音量（0-1）；读不到时按 0 处理。"""
+        get_volume = getattr(self._output, "volume", None)
+        if not callable(get_volume):
+            return 0.0
+        try:
+            return float(get_volume())
+        except (TypeError, ValueError):
+            return 0.0
+
+    def describe(self) -> str:
+        """一行音频现状，启动时写进日志——「没声音」时先看这一行。"""
+        device = output_device_name() or "（未找到输出设备）"
+        return f"输出设备={device}，当前音量={self.volume:.2f}"
 
     def _reset(self) -> None:
         """断开当前播放的回调、停掉设备并清空状态。"""
@@ -195,10 +226,16 @@ class AudioCoordinator(QObject):
             return 0
 
     def _check_started(self) -> None:
-        """兜底：迟迟没有进入播放态，说明后端吞了 play 或无法解码。"""
+        """兜底：迟迟没有进入播放态，说明后端吞了 play 或无法解码。
+
+        补播放在这里而不是状态回调里：``LoadedMedia``/``BufferedMedia`` 到达时
+        ``playbackState`` 常常还是 ``StoppedState``，在回调里立刻再 play 会把
+        刚起来的播放重置（表现为气泡在走、没有声音）。
+        """
         if not self._playing:
             return
         if self._is_playing() or self._position() > 0:
+            self._watchdog.stop()
             return
         status = None
         get_status = getattr(self._player, "mediaStatus", None)
@@ -208,7 +245,19 @@ class AudioCoordinator(QObject):
             except (TypeError, ValueError):
                 status = None
         name = getattr(status, "name", "")
-        if name in ("LoadingMedia", "LoadedMedia", "BufferedMedia") and self._grace > 0:
+        if name in _PENDING_START_STATES and not self._retried:
+            # 媒体已加载却没起步：补一次 play，把被吞掉的那一句救回来。
+            self._retried = True
+            self._player.play()
+            self._watchdog.start()
+            return
+        if name in _PENDING_START_STATES and not self._retried:
+            # 媒体已加载却没起步：补一次 play，把被吞掉的那一句救回来。
+            self._retried = True
+            self._player.play()
+            self._watchdog.start()
+            return
+        if name in ("LoadingMedia", *_PENDING_START_STATES) and self._grace > 0:
             # 还在加载：再宽限一轮，别把「机器慢」误判成「没有后端」。
             self._grace -= 1
             self._watchdog.start()

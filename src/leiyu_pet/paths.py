@@ -81,3 +81,21 @@ def assets_store_dir() -> Path:
 def log_path() -> Path:
     """返回日志文件路径。"""
     return base_dir() / "pet.log"
+
+
+def app_icon_path() -> Path | None:
+    """返回产品图标（.ico）；找不到时返回 ``None``，调用方回退系统图标。
+
+    冻结态由打包脚本放到 ``_MEIPASS/assets/app.ico``；源码运行取仓库里的
+    ``packaging/app.ico``；便携版还允许放在 exe 同级 ``assets`` 目录。
+    """
+    candidates: list[Path] = []
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.append(Path(meipass) / "assets" / "app.ico")
+    candidates.append(Path(__file__).resolve().parents[2] / "packaging" / "app.ico")
+    candidates.append(exe_dir() / "assets" / "app.ico")
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None

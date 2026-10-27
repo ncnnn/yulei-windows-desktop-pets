@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QObject
-from PySide6.QtGui import QAction, QActionGroup
+from PySide6.QtGui import QAction, QActionGroup, QIcon
 from PySide6.QtWidgets import QApplication, QMenu, QStyle, QSystemTrayIcon
 
 from . import APP_NAME, frosted_ui
@@ -11,7 +11,7 @@ from .autostart import is_enabled, self_check_requested_but_missing, set_enabled
 from .config import Config, save_config
 from .context_menu import ROLE_NAMES
 from .crosstalk import LINE_PRESETS
-from .paths import config_path
+from .paths import app_icon_path, config_path
 from .reminders import BREAK_PRESETS
 from .stick_body import ACTION_LABELS, RANDOM_ACTIONS
 
@@ -50,22 +50,36 @@ class TrayManager(QObject):
         self._on_quit = on_quit
 
         self._tray = QSystemTrayIcon(self)
-        icon = QApplication.style().standardIcon(
-            QStyle.StandardPixmap.SP_ComputerIcon
-        )
-        self._tray.setIcon(icon)
+        self._tray.setIcon(self._app_icon())
         self._tray.setToolTip(APP_NAME)
 
         self._menu = frosted_ui.FrostedMenu()
         self._tray.setContextMenu(self._menu)
         self._actions: list[QAction] = []
+        #: (action, 取值回调)：菜单每次弹出前按最新状态刷新勾选，不用整份重建。
+        self._checks: list[tuple[QAction, object]] = []
         self._submenus: list[QMenu] = []
+        self._menu.aboutToShow.connect(self._sync_checks)
 
         self._tray.activated.connect(self._on_activated)
         # 播放模式变化时更新悬浮提示（决战/相声中一眼可见）。
         mode_signal = getattr(getattr(runtime, "controller", None), "mode_changed", None)
         if mode_signal is not None:
             mode_signal.connect(self._on_mode_changed)
+
+    @staticmethod
+    def _app_icon() -> QIcon:
+        """托盘图标用产品图标，不再借用系统的通用电脑图标。
+
+        旧实现固定用 ``SP_ComputerIcon``，改名、换图标都反映不到托盘上，
+        看起来就像「图标没更新」。
+        """
+        path = app_icon_path()
+        if path is not None:
+            icon = QIcon(str(path))
+            if not icon.isNull():
+                return icon
+        return QApplication.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon)
 
     def show(self) -> None:
         self.build_menu()
@@ -82,9 +96,19 @@ class TrayManager(QObject):
             sub.deleteLater()
         self._submenus = []
         self._actions = []
+        self._checks = []
         self._menu.clear()
         self._build_contents()
         self._apply_frosted()
+
+    def _sync_checks(self) -> None:
+        """菜单弹出前把勾选状态对齐到最新值。
+
+        菜单内容只在 ``show()``/双击时重建，期间用户可能在设置页或右键菜单里
+        改了声音模式、音量、显隐——不刷新就会出现「勾还停在旧位置」的错觉。
+        """
+        for action, getter in self._checks:
+            action.setChecked(bool(getter()))
 
     def _apply_frosted(self) -> None:
         plan = getattr(self.runtime, "frosted_plan", None)
@@ -103,10 +127,13 @@ class TrayManager(QObject):
         checkable: bool = False,
         checked: bool = False,
         pass_checked: bool = False,
+        checked_of=None,
     ) -> QAction:
         action = menu.addAction(text)
         action.setCheckable(checkable)
         action.setChecked(checked)
+        if checked_of is not None:
+            self._checks.append((action, checked_of))
         if pass_checked:
             action.triggered.connect(callback)
         else:
@@ -133,6 +160,7 @@ class TrayManager(QObject):
                 lambda _checked=False, v=value, handler=on_trigger: handler(v),
                 checkable=True,
                 checked=is_checked(value),
+                checked_of=lambda v=value: is_checked(v),
             )
             group.addAction(action)
         return group
@@ -147,6 +175,7 @@ class TrayManager(QObject):
             checkable=True,
             pass_checked=True,
             checked=rt.windows["lei"].isVisible(),
+            checked_of=lambda role="lei": rt.windows[role].isVisible(),
         )
         self._add_action(
             self._menu,
@@ -155,6 +184,7 @@ class TrayManager(QObject):
             checkable=True,
             pass_checked=True,
             checked=rt.windows["yu"].isVisible(),
+            checked_of=lambda role="yu": rt.windows[role].isVisible(),
         )
         self._add_action(self._menu, "显示全部", rt.show_all)
         self._menu.addSeparator()

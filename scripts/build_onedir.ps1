@@ -22,6 +22,7 @@ if (-not (Test-Path "packaging\app.ico")) {
     --icon packaging\app.ico `
     --paths src `
     --add-data "assets\default_pack;assets\default_pack" `
+    --add-data "packaging\app.ico;assets" `
     packaging\entry.py
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller 构建失败" }
 

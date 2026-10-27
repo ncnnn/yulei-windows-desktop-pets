@@ -272,14 +272,24 @@ def test_watchdog_stays_silent_after_position_advances(bundle: Bundle, tmp_path:
     assert bundle.coordinator.is_playing is True
 
 
-def test_loaded_media_without_playing_state_retries_play(
-    bundle: Bundle, tmp_path: Path
-) -> None:
-    """Qt 的 WMF 后端偶发吞掉 play()：已加载但停在 StoppedState 时要补一次。"""
+def test_loaded_media_does_not_replay_immediately(bundle: Bundle, tmp_path: Path) -> None:
+    """状态回调里绝不补 play：那一刻 state 常还是 StoppedState，连发会把播放重置。"""
     bundle.coordinator.play("lei", clip(1), tmp_path / "a.mp3")
     assert bundle.player.play_calls == 1
 
     bundle.player.emit_status(NamedStatus("LoadedMedia"))
+    bundle.player.emit_status(NamedStatus("BufferedMedia"))
+
+    assert bundle.player.play_calls == 1
+    assert "error" not in bundle.recorder.names()
+
+
+def test_watchdog_retries_play_when_loaded_but_stopped(bundle: Bundle, tmp_path: Path) -> None:
+    """真卡住（已加载却停在 StoppedState）时由 watchdog 补一次 play 救回来。"""
+    bundle.coordinator.play("lei", clip(1), tmp_path / "a.mp3")
+    bundle.player.emit_status(NamedStatus("LoadedMedia"))
+
+    bundle.coordinator._check_started()
 
     assert bundle.player.play_calls == 2
     assert bundle.coordinator.is_playing is True
@@ -290,8 +300,10 @@ def test_retry_stops_once_playback_actually_runs(bundle: Bundle, tmp_path: Path)
     bundle.coordinator.play("lei", clip(1), tmp_path / "a.mp3")
     bundle.player.state = NamedStatus("PlayingState")
     bundle.player.emit_status(NamedStatus("BufferedMedia"))
+    bundle.coordinator._check_started()
 
     assert bundle.player.play_calls == 1
+    assert "error" not in bundle.recorder.names()
 
 
 def test_watchdog_grants_one_extra_round_while_loading(

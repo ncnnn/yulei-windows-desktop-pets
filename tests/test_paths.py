@@ -92,3 +92,11 @@ def test_assets_store_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> No
     result = paths.assets_store_dir()
     assert result == paths.base_dir() / "assets"
     assert result.is_dir()
+
+
+def test_app_icon_path_finds_the_repo_icon() -> None:
+    """源码运行时图标取自仓库 packaging/；打包后由 _MEIPASS 提供。"""
+    path = paths.app_icon_path()
+    assert path is not None
+    assert path.is_file()
+    assert path.suffix.lower() == ".ico"

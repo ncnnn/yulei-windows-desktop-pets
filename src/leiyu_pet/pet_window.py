@@ -37,7 +37,7 @@ from .layout import (
     window_width,
 )
 from .models import Role
-from .platform_win import HTTRANSPARENT, nchittest_point
+from .platform_win import HTCLIENT, HTTRANSPARENT, nchittest_point
 from .proximity import Rect
 from .status_widget import STATUS_HEIGHT, StatusWidget
 from .stick_body import DRAG, IDLE, StickAnimator, hits_pose
@@ -390,6 +390,11 @@ class PetWindow(QWidget):
         （那是整窗开关，连大头都点不到）。命中判定仍交给 `hit_test()`，所以穿透
         口径与视觉完全一致——只有大头像素、火柴人线条、气泡与状态胶囊算「实体」。
 
+        **必须显式返回 HTCLIENT**：``WM_NCHITTEST`` 的返回值为 0 是 ``HTNOWHERE``，
+        意思是「这一点不属于任何窗口」，鼠标按下、拖动、右键全部收不到——这正是
+        v2.1.1 之后「桌宠点不动」的根因（当时命中也返回 ``(False, 0)``，等于让
+        Windows 把整只桌宠当成不可交互）。
+
         非 Windows、或不是这条消息时交回 Qt 默认处理。
         """
         if event_type != b"windows_generic_MSG":
@@ -401,7 +406,7 @@ class PetWindow(QWidget):
         local = self.mapFromGlobal(QPoint(point[0], point[1]))
         if not self.hit_test(local):
             return True, HTTRANSPARENT
-        return False, 0
+        return True, HTCLIENT
 
     def hit_test_global(self, global_pos: QPoint) -> bool:
         """屏幕坐标版的命中测试，供穿透判定与调试复用。"""

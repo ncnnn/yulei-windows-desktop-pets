@@ -48,6 +48,7 @@ def _build_stub_modules():
     paths_mod.assets_dir = lambda: _STUB_ROOT / "assets"
     paths_mod.assets_store_dir = lambda: _STUB_ROOT / "assets"
     paths_mod.config_path = lambda: _STUB_ROOT / "config.json"
+    paths_mod.app_icon_path = lambda: None
     paths_mod.is_portable = lambda: False
 
     autostart_mod = types.ModuleType("leiyu_pet.autostart")

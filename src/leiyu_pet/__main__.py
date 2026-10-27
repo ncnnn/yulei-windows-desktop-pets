@@ -271,12 +271,17 @@ def main(argv: list[str] | None = None) -> int:
         return run_audio_selftest()
 
     from PySide6.QtCore import QTimer
+    from PySide6.QtGui import QIcon
     from PySide6.QtWidgets import QApplication, QDialog
 
     from . import autostart
 
     app = QApplication.instance() or QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
+    icon_path = paths.app_icon_path()
+    if icon_path is not None:
+        # 任务栏、Alt-Tab 与消息框都跟着产品图标走；托盘另有自己的入口。
+        app.setWindowIcon(QIcon(str(icon_path)))
 
     if args.reset:
         with contextlib.suppress(OSError):
@@ -331,6 +336,14 @@ def main(argv: list[str] | None = None) -> int:
         tray.notify(
             "素材校验失败",
             "；".join(pack_problems)[:200],
+            warning=True,
+        )
+    audio_state = runtime.audio.describe()
+    LOGGER.info("音频：%s", audio_state)
+    if "未找到输出设备" in audio_state:
+        tray.notify(
+            "没有可用的音频输出设备",
+            "系统里没有检测到扬声器/耳机，桌宠会静音播放。插好设备后在托盘菜单里切换一次音量即可恢复。",
             warning=True,
         )
     runtime.controller.playback_error.connect(
