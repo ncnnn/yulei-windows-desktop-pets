@@ -4,7 +4,7 @@
 
 #define AppName "鱼雷双桌宠"
 #ifndef AppVersion
-  #define AppVersion "2.1.6"
+  #define AppVersion "2.1.7"
 #endif
 #define AppPublisher "leiyu-desktop-pets-windows contributors"
 #define AppExe "leiyu_pet.exe"
@@ -29,6 +29,8 @@ UninstallDisplayIcon={app}\{#AppExe}
 SetupIconFile=app.ico
 LicenseFile=..\LICENSE
 CloseApplications=yes
+; 覆盖安装时先结束仍在运行的旧进程，否则新装的修复要等手动退出才生效。
+CloseApplicationsFilter={#AppExe}
 RestartApplications=no
 
 [Tasks]

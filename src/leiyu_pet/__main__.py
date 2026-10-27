@@ -341,6 +341,8 @@ def main(argv: list[str] | None = None) -> int:
         )
     audio_state = runtime.audio.describe()
     LOGGER.info("音频：%s", audio_state)
+    # 命中判定要按物理像素↔逻辑像素换算；把缩放写进日志，排障时一眼可查。
+    LOGGER.info("显示：主屏缩放=%d%%", round(app.devicePixelRatio() * 100))
     if "未找到输出设备" in audio_state:
         tray.notify(
             "没有可用的音频输出设备",

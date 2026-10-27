@@ -202,6 +202,40 @@ def nchittest_point(message_ptr: int) -> tuple[int, int] | None:
         return None
 
 
+def window_rect(hwnd: int) -> tuple[int, int, int, int] | None:
+    """窗口在屏幕上的**物理像素**矩形 ``(left, top, right, bottom)``。
+
+    ``WM_NCHITTEST`` 的 lParam 是物理像素，Qt 的坐标却是逻辑像素；要把命中点
+    换算回窗口局部坐标，必须以这个矩形为准（见 ``PetWindow._native_to_local``）。
+    无边框 + 去投影的窗口没有 DWM 边框，矩形与实际绘制区域完全一致。
+
+    取不到（非 Windows、句柄无效、窗口已销毁）时返回 ``None``，调用方回退到
+    Qt 的 ``devicePixelRatioF`` 换算。
+    """
+    if not on_windows() or not hwnd:
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class RECT(ctypes.Structure):
+            _fields_ = [
+                ("left", wintypes.LONG),
+                ("top", wintypes.LONG),
+                ("right", wintypes.LONG),
+                ("bottom", wintypes.LONG),
+            ]
+
+        rect = RECT()
+        if not ctypes.windll.user32.GetWindowRect(wintypes.HWND(hwnd), ctypes.byref(rect)):
+            return None
+        if rect.right <= rect.left or rect.bottom <= rect.top:
+            return None
+        return (rect.left, rect.top, rect.right, rect.bottom)
+    except Exception:
+        return None
+
+
 def round_corners(hwnd: int) -> bool:
     """Win11：让系统把窗口边框画成圆角（旧系统静默失败）。"""
     if not on_windows() or not hwnd:

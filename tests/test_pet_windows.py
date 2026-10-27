@@ -13,6 +13,8 @@ from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, Qt
 from PySide6.QtGui import QColor, QImage, QMouseEvent, QPainter
 from PySide6.QtWidgets import QApplication
 
+from leiyu_pet import pet_window as pet_window_module
+from leiyu_pet import platform_win
 from leiyu_pet.animation import (
     DEFAULT_PET_SIZE,
     MAX_PET_SIZE,
@@ -643,6 +645,27 @@ def nchittest(window: PetWindow, local: QPoint) -> tuple[bool, int]:
     return window.nativeEvent(b"windows_generic_MSG", ctypes.addressof(msg))
 
 
+def nchittest_physical(window: PetWindow, screen_x: int, screen_y: int) -> tuple[bool, int]:
+    """直接给**物理像素**屏幕坐标（Windows 真正送进来的就是这种值）。"""
+    msg = _Msg()
+    msg.message = 0x0084  # WM_NCHITTEST
+    msg.lParam = ((screen_y & 0xFFFF) << 16) | (screen_x & 0xFFFF)
+    return window.nativeEvent(b"windows_generic_MSG", ctypes.addressof(msg))
+
+
+def fake_physical_rect(window: PetWindow, scale: float, monkeypatch) -> tuple[int, int, int, int]:
+    """假装窗口跑在 ``scale`` 倍缩放的屏幕上：物理矩形比逻辑尺寸大 ``scale`` 倍。"""
+    origin = (3000, 2000)
+    rect = (
+        origin[0],
+        origin[1],
+        int(origin[0] + window.width() * scale),
+        int(origin[1] + window.height() * scale),
+    )
+    monkeypatch.setattr(pet_window_module, "window_rect", lambda hwnd: rect)
+    return rect
+
+
 def test_window_flags_disable_system_shadow(pet: PetWindow) -> None:
     """无边框透明窗口不能再被系统投影糊上一圈灰边。"""
     assert has_flag(pet.windowFlags(), Qt.WindowType.NoDropShadowWindowHint)
@@ -695,6 +718,76 @@ def test_nchittest_ignores_other_messages(pet: PetWindow) -> None:
     msg.message = 0x0001  # WM_CREATE
     handled, _result = pet.nativeEvent(b"windows_generic_MSG", ctypes.addressof(msg))
     assert handled is False
+
+
+def test_nchittest_scales_physical_pixels_back_to_logical(pet: PetWindow, monkeypatch) -> None:
+    """150% 缩放屏：lParam 是物理像素，当成逻辑坐标用会算出窗口外的坐标。
+
+    这个换算错误会让整只桌宠在任何位置都被判成透明（HTTRANSPARENT），表现就是
+    「看得见，却点不到、拖不动、右键也不出菜单」——v2.1.1 起的点不动正根因在此。
+    """
+    scale = 1.5
+    left, top, _right, _bottom = fake_physical_rect(pet, scale, monkeypatch)
+    pet.show()
+
+    local = center_point(pet)
+    handled, result = nchittest_physical(
+        pet, int(left + local.x() * scale), int(top + local.y() * scale)
+    )
+
+    assert handled is True
+    assert result == HTCLIENT
+
+
+def test_nchittest_scales_limb_hits_too(pet: PetWindow, monkeypatch) -> None:
+    """火柴人线条同样要在高 DPI 下命中，不能只有头部可点。"""
+    scale = 1.5
+    left, top, _right, _bottom = fake_physical_rect(pet, scale, monkeypatch)
+    pet.show()
+
+    center_x, neck_y = pet._neck_point()
+    pose = pet._stick.pose()
+    arm = pose.arms[0]
+    unit = pet._body_height()
+    local = QPoint(
+        int(center_x + (arm.joint[0] + arm.end[0]) / 2 * unit),
+        int(neck_y + (arm.joint[1] + arm.end[1]) / 2 * unit),
+    )
+
+    handled, result = nchittest_physical(
+        pet, int(left + local.x() * scale), int(top + local.y() * scale)
+    )
+
+    assert handled is True
+    assert result == HTCLIENT
+
+
+def test_nchittest_still_passes_through_at_high_dpi(pet: PetWindow, monkeypatch) -> None:
+    """换算修好之后，透明像素必须照旧穿透，不能反过来整窗都变实体。"""
+    scale = 1.5
+    left, top, _right, _bottom = fake_physical_rect(pet, scale, monkeypatch)
+    pet.show()
+
+    handled, result = nchittest_physical(pet, int(left + 4 * scale), int(top + 4 * scale))
+
+    assert handled is True
+    assert result == HTTRANSPARENT
+
+
+def test_native_to_local_falls_back_to_device_pixel_ratio(pet: PetWindow, monkeypatch) -> None:
+    """拿不到物理矩形时退回 DPR 除法：同样不能把物理像素直接当逻辑坐标。"""
+    monkeypatch.setattr(pet_window_module, "window_rect", lambda hwnd: None)
+    monkeypatch.setattr(PetWindow, "devicePixelRatioF", lambda self: 2.0)
+    origin = pet.mapToGlobal(QPoint(0, 0))
+
+    local = pet._native_to_local(origin.x() * 2 + 24, origin.y() * 2 + 30)
+
+    assert (local.x(), local.y()) == pytest.approx((12.0, 15.0))
+
+
+def test_window_rect_is_none_without_a_handle() -> None:
+    """没有句柄（或不在 Windows 上）时安静返回 None，由调用方回退。"""
+    assert platform_win.window_rect(0) is None
 
 
 def test_hit_test_between_limbs_is_transparent(pet: PetWindow) -> None:

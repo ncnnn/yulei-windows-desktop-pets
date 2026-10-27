@@ -38,7 +38,7 @@ from .layout import (
     window_width,
 )
 from .models import Role
-from .platform_win import HTCLIENT, HTTRANSPARENT, nchittest_point
+from .platform_win import HTCLIENT, HTTRANSPARENT, nchittest_point, window_rect
 from .proximity import Rect
 from .status_widget import STATUS_HEIGHT, StatusWidget
 from .stick_body import DRAG, IDLE, StickAnimator, hits_pose
@@ -406,10 +406,36 @@ class PetWindow(QWidget):
         if point is None:
             # 不认识的 Windows 消息交回 Qt（返回 False = 未处理，Qt 继续默认流程）。
             return False, 0
-        local = self.mapFromGlobal(QPoint(point[0], point[1]))
-        if not self.hit_test(local):
+        if not self.hit_test(self._native_to_local(point[0], point[1])):
             return True, HTTRANSPARENT
         return True, HTCLIENT
+
+    def _native_to_local(self, screen_x: int, screen_y: int) -> QPointF:
+        """把 ``WM_NCHITTEST`` 的物理屏幕坐标换算成 Qt 的窗口逻辑坐标。
+
+        Windows 给的一直是**物理像素**，Qt 用的却是**逻辑像素**。在 150% 缩放的
+        屏幕上两者差 1.5 倍：直接把物理值喂给 ``mapFromGlobal``，算出来的局部坐标
+        会被整体放大并向右下偏移，几乎必然落到窗口之外——于是整只桌宠都被判成
+        透明（``HTTRANSPARENT``），点击、拖动、右键全部穿透到下层窗口。这正是
+        v2.1.1 起「看得见却点不到」的根因。
+
+        换算优先用 ``GetWindowRect`` 的物理矩形与窗口逻辑尺寸做线性映射：不依赖
+        DPI API 的口径，跨屏、缩放策略变化都稳；取不到矩形时再退回 DPR 除法。
+        """
+        if self.isVisible():
+            rect = window_rect(int(self.winId()))
+            if rect is not None:
+                left, top, right, bottom = rect
+                physical_width = right - left
+                physical_height = bottom - top
+                if physical_width > 0 and physical_height > 0:
+                    return QPointF(
+                        (screen_x - left) * self.width() / physical_width,
+                        (screen_y - top) * self.height() / physical_height,
+                    )
+        ratio = self.devicePixelRatioF() or 1.0
+        origin = self.mapToGlobal(QPoint(0, 0))
+        return QPointF(screen_x / ratio - origin.x(), screen_y / ratio - origin.y())
 
     def hit_test_global(self, global_pos: QPoint) -> bool:
         """屏幕坐标版的命中测试，供穿透判定与调试复用。"""
@@ -799,9 +825,10 @@ class PetWindow(QWidget):
         """
         if self._click_through:
             return False
-        if self._hit_caption(local) or self._hit_status(local):
-            return True
         point = QPointF(local)
+        rounded = point.toPoint()
+        if self._hit_caption(rounded) or self._hit_status(rounded):
+            return True
         if self._hit_head(point):
             return True
         return self._stick_enabled and self._hit_stick(point)
