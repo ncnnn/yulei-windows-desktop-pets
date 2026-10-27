@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from PySide6.QtCore import QObject, QPoint, Signal
 
 from leiyu_pet.manifest import load_asset_pack
@@ -107,5 +108,72 @@ def test_restore_positions_rejects_garbage(asset_pack_factory) -> None:
         assert runtime.restore_positions(None) is False
         assert runtime.restore_positions({"lei": [], "yu": [1]}) is False
         assert runtime.restore_positions({"lei": ["a", "b"]}) is False
+    finally:
+        runtime.close()
+
+
+def test_mute_toggles_and_restores_previous_volume(asset_pack_factory) -> None:
+    pack = load_asset_pack(asset_pack_factory())
+    audio = FakeAudio()
+    runtime = PetRuntime(pack, audio=audio, show=False)
+    try:
+        runtime.set_volume(0.4)
+        assert runtime.toggle_mute() is True
+        assert runtime.muted is True
+        assert audio.volume == 0.0
+        assert runtime.toggle_mute() is False
+        assert runtime.volume == pytest.approx(0.4)
+    finally:
+        runtime.close()
+
+
+def test_opacity_and_always_on_top_apply_to_windows(asset_pack_factory) -> None:
+    pack = load_asset_pack(asset_pack_factory())
+    runtime = PetRuntime(pack, audio=FakeAudio(), show=False)
+    try:
+        runtime.set_opacity(0.5)
+        assert runtime.windows["lei"].opacity == pytest.approx(0.5)
+        runtime.set_always_on_top(False)
+        assert runtime.windows["lei"].always_on_top is False
+        assert runtime.windows["yu"].always_on_top is False
+    finally:
+        runtime.close()
+
+
+def test_wander_timer_can_be_enabled_and_disabled(asset_pack_factory) -> None:
+    pack = load_asset_pack(asset_pack_factory())
+    runtime = PetRuntime(pack, audio=FakeAudio(), show=False)
+    try:
+        runtime.set_wander_enabled(True, 30)
+        assert runtime._wander_timer.isActive()
+        assert runtime._wander_timer.interval() == 30_000
+        runtime.set_wander_enabled(False)
+        assert not runtime._wander_timer.isActive()
+    finally:
+        runtime.close()
+
+
+def test_settings_dialog_builds_against_real_windows(
+    asset_pack_factory, qtbot, monkeypatch, tmp_path
+) -> None:
+    """真窗口的 click_through 是属性，设置页必须按属性读取（回归 v1.2 的 TypeError）。"""
+    from leiyu_pet import paths
+    from leiyu_pet.config import Config
+    from leiyu_pet.settings_dialog import SettingsDialog
+
+    monkeypatch.setattr(paths, "base_dir", lambda: tmp_path)
+    monkeypatch.setattr(paths, "config_path", lambda: tmp_path / "config.json")
+
+    pack = load_asset_pack(asset_pack_factory())
+    runtime = PetRuntime(pack, audio=FakeAudio(), show=False)
+    runtime.config = Config()
+    try:
+        dialog = SettingsDialog(runtime, runtime.config)
+        assert dialog._tabs.count() == 4
+        dialog._on_caption_size(15)
+        dialog._on_opacity(60)
+        assert runtime.windows["lei"].caption_widget.font_size() == 15
+        assert runtime.windows["lei"].opacity == pytest.approx(0.6)
+        dialog.close()
     finally:
         runtime.close()

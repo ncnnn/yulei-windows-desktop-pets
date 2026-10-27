@@ -103,6 +103,10 @@ for _name, _mod in _STUBS.items():
     else:
         sys.modules[_name] = _SAVED_MODULES[_name]
 
+# settings_dialog 已在本文件的桩环境下导入；从缓存移除，后续测试会拿到
+# 绑定真实 config/paths 的新模块（否则 save_config 仍是桩函数）。
+sys.modules.pop("leiyu_pet.settings_dialog", None)
+
 
 class FakeWindow:
     def __init__(self, visible=True, size=220):
@@ -124,6 +128,7 @@ class FakeWindow:
     def set_click_through(self, value):
         self._click_through = bool(value)
 
+    @property
     def click_through(self):
         return self._click_through
 
@@ -141,8 +146,13 @@ class FakeController:
         self.tilt_enabled = True
         self.crosstalk_lines = 6
         self.playback_rate = 1.0
+        self.overlap_enabled = False
         self.proximity = types.SimpleNamespace(distance=32.0)
         self.calls = []
+
+    def set_overlap_easter_egg(self, value):
+        self.calls.append(("set_overlap_easter_egg", value))
+        self.overlap_enabled = bool(value)
 
     def set_voice_mode(self, mode):
         self.calls.append(("set_voice_mode", mode))
@@ -394,8 +404,8 @@ def test_click_through_checkbox(app):
     dialog = SettingsDialog(runtime, Config())
 
     _check(dialog, "click_through").setChecked(True)
-    assert runtime.windows["lei"].click_through() is True
-    assert runtime.windows["yu"].click_through() is True
+    assert runtime.windows["lei"].click_through is True
+    assert runtime.windows["yu"].click_through is True
 
 
 def test_lock_checkbox_applies_and_saves(app):

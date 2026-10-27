@@ -39,7 +39,13 @@ def test_parse_rejects_bad_specs() -> None:
 
 
 def test_default_bindings_are_valid() -> None:
-    assert set(DEFAULT_BINDINGS) == {"toggle_visible", "crosstalk", "random_line", "stop"}
+    assert set(DEFAULT_BINDINGS) == {
+        "toggle_visible",
+        "crosstalk",
+        "random_line",
+        "mute",
+        "stop",
+    }
     for spec in DEFAULT_BINDINGS.values():
         assert parse_binding(spec)
 

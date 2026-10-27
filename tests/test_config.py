@@ -97,3 +97,37 @@ def test_save_only_writes_whitelisted_keys(tmp_path: Path) -> None:
     save_config(Config(), path)
     data = json.loads(path.read_text(encoding="utf-8"))
     assert set(data) == set(DEFAULTS)
+
+
+def test_new_settings_are_clamped_and_normalized(tmp_path: Path) -> None:
+    path = tmp_path / "config.json"
+    path.write_text(
+        json.dumps(
+            {
+                "caption_font_size": 99,
+                "opacity": 5,
+                "break_reminder_minutes": -1,
+                "pomodoro_focus_minutes": 999,
+                "pomodoro_break_minutes": 0,
+                "wander_interval_seconds": 1,
+                "quiet_start": "7:5",
+                "quiet_end": "bad",
+            }
+        ),
+        encoding="utf-8",
+    )
+    cfg = load_config(path)
+    assert cfg.caption_font_size == 20
+    assert cfg.opacity == 1.0
+    assert cfg.break_reminder_minutes == 0
+    assert cfg.pomodoro_focus_minutes == 120
+    assert cfg.pomodoro_break_minutes == 1
+    assert cfg.wander_interval_seconds == 10
+    assert cfg.quiet_start == "07:05"
+    assert cfg.quiet_end == "08:00"
+
+
+def test_opacity_lower_bound(tmp_path: Path) -> None:
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"opacity": 0.0}), encoding="utf-8")
+    assert load_config(path).opacity == 0.3

@@ -39,6 +39,21 @@ class FakeController:
     def set_crosstalk_lines(self, value: int) -> None:
         self.calls["crosstalk_lines"] = value
 
+    def set_overlap_easter_egg(self, value: bool) -> None:
+        self.calls["overlap_easter_egg"] = value
+
+
+class FakeAssistant:
+    def __init__(self) -> None:
+        self.config: dict[str, object] = {}
+        self.quiet = None
+
+    def configure(self, **kwargs) -> None:
+        self.config = dict(kwargs)
+
+    def set_quiet_checker(self, checker) -> None:
+        self.quiet = checker
+
 
 class FakeRuntime:
     def __init__(self) -> None:
@@ -47,8 +62,13 @@ class FakeRuntime:
         self.visible: dict[str, bool] = {}
         self.sizes: dict[str, int] = {}
         self.rate: float | None = None
+        self.opacity: float | None = None
+        self.caption_font_size: int | None = None
+        self.always_on_top: bool | None = None
+        self.wander: tuple[bool, int] | None = None
         self.windows = {"lei": FakeWindow(), "yu": FakeWindow()}
         self.controller = FakeController()
+        self.assistant = FakeAssistant()
 
     def set_volume(self, value: float) -> None:
         self.volume = value
@@ -64,6 +84,18 @@ class FakeRuntime:
 
     def set_rate(self, rate: float) -> None:
         self.rate = rate
+
+    def set_opacity(self, value: float) -> None:
+        self.opacity = value
+
+    def set_caption_font_size(self, value: int) -> None:
+        self.caption_font_size = value
+
+    def set_always_on_top(self, value: bool) -> None:
+        self.always_on_top = value
+
+    def set_wander_enabled(self, enabled: bool, interval_seconds: int | None = None) -> None:
+        self.wander = (bool(enabled), int(interval_seconds or 0))
 
 
 def test_parser_defaults() -> None:
@@ -119,6 +151,14 @@ def test_apply_config_propagates_to_runtime_and_windows() -> None:
     assert runtime.windows["yu"].locked is True
     assert runtime.windows["lei"].click_through is True
     assert runtime.windows["yu"].reduce_motion is True
+
+    assert runtime.opacity == cfg.opacity
+    assert runtime.caption_font_size == cfg.caption_font_size
+    assert runtime.always_on_top is cfg.always_on_top
+    assert runtime.wander == (cfg.wander_enabled, cfg.wander_interval_seconds)
+    assert runtime.controller.calls["overlap_easter_egg"] is cfg.overlap_easter_egg
+    assert runtime.assistant.config["hourly"] is cfg.hourly_chime
+    assert runtime.assistant.quiet is not None
 
 
 def _isolate(monkeypatch, tmp_path: Path) -> None:

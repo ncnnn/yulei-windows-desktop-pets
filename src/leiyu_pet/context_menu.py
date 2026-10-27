@@ -48,7 +48,33 @@ class ContextMenuManager(QObject):
                 partial(self.runtime.controller.play_solo, role, clip.id),
             )
 
+        history_menu = menu.addMenu("最近说过")
+        entries = self.runtime.controller.recent(role, 6)
+        if not entries:
+            empty = history_menu.addAction("暂无记录")
+            empty.setEnabled(False)
+        for clip_id, text in reversed(entries):
+            label = text.replace("\n", " ")
+            self._add_action(
+                history_menu,
+                label[:32] + ("…" if len(label) > 32 else ""),
+                partial(self.runtime.controller.play_solo, role, clip_id),
+            )
+
         self._add_action(menu, "停止播放", self.runtime.controller.stop_all)
+        self._add_action(
+            menu,
+            "恢复声音" if getattr(self.runtime, "muted", False) else "静音",
+            self.runtime.toggle_mute,
+        )
+
+        assistant = getattr(self.runtime, "assistant", None)
+        if assistant is not None:
+            focus_menu = menu.addMenu("番茄钟")
+            self._add_action(focus_menu, "开始专注", self._start_pomodoro)
+            self._add_action(focus_menu, "停止计时", assistant.stop_pomodoro)
+            status = focus_menu.addAction(assistant.pomodoro_status())
+            status.setEnabled(False)
         menu.addSeparator()
         self._add_voice_menu(menu)
         self._add_volume_menu(menu)
@@ -63,6 +89,25 @@ class ContextMenuManager(QObject):
             pass_checked=True,
         )
         tilt_action.setChecked(self.runtime.controller.tilt_enabled)
+
+        wander_action = self._add_action(
+            menu,
+            "自动游走",
+            self.runtime.set_wander_enabled,
+            checkable=True,
+            pass_checked=True,
+        )
+        config = getattr(self.runtime, "config", None)
+        wander_action.setChecked(bool(getattr(config, "wander_enabled", False)))
+
+        overlap_action = self._add_action(
+            menu,
+            "重叠时自动对喷",
+            self.runtime.controller.set_overlap_easter_egg,
+            checkable=True,
+            pass_checked=True,
+        )
+        overlap_action.setChecked(self.runtime.controller.overlap_enabled)
 
         menu.addSeparator()
         other: Role = "yu" if role == "lei" else "lei"
@@ -88,6 +133,11 @@ class ContextMenuManager(QObject):
             return
         self.runtime.show_all()
         self.runtime.controller.start_crosstalk()
+
+    def _start_pomodoro(self) -> None:
+        assistant = getattr(self.runtime, "assistant", None)
+        if assistant is not None:
+            assistant.start_pomodoro()
 
     def _add_voice_menu(self, menu: QMenu) -> None:
         voice_menu = menu.addMenu("声音模式")

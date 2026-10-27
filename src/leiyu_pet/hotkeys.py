@@ -22,13 +22,14 @@ MOD_SHIFT = 0x0004
 MOD_WIN = 0x0008
 MOD_NOREPEAT = 0x4000
 
-HotkeyAction = Literal["toggle_visible", "crosstalk", "random_line", "stop"]
+HotkeyAction = Literal["toggle_visible", "crosstalk", "random_line", "mute", "stop"]
 
-#: 默认绑定：显示/隐藏、相声模式、随机一句、停止播放。
+#: 默认绑定：显示/隐藏、相声模式、随机一句、静音、停止播放。
 DEFAULT_BINDINGS: dict[str, str] = {
     "toggle_visible": "ctrl+alt+h",
     "crosstalk": "ctrl+alt+k",
     "random_line": "ctrl+alt+r",
+    "mute": "ctrl+alt+m",
     "stop": "ctrl+alt+x",
 }
 
@@ -36,6 +37,7 @@ ACTION_LABELS: dict[str, str] = {
     "toggle_visible": "显示/隐藏桌宠",
     "crosstalk": "相声模式",
     "random_line": "随机说一段",
+    "mute": "静音/恢复",
     "stop": "停止播放",
 }
 

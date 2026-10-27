@@ -40,6 +40,21 @@ def gap(a: Rect, b: Rect) -> float:
     return math.hypot(horizontal, vertical)
 
 
+def overlap_area(a: Rect, b: Rect) -> float:
+    """两个矩形的交集面积（无交集为 0）。"""
+    width = max(0.0, min(a.right, b.right) - max(a.left, b.left))
+    height = max(0.0, min(a.bottom, b.bottom) - max(a.top, b.top))
+    return width * height
+
+
+def overlap_ratio(a: Rect, b: Rect) -> float:
+    """交集面积占较小矩形的比例，取值 0..1；用于判断「叠在一起」。"""
+    smaller = min(a.width * a.height, b.width * b.height)
+    if smaller <= 0:
+        return 0.0
+    return min(1.0, overlap_area(a, b) / smaller)
+
+
 def angle_for_delta(dx: float, *, radians: float = 0.20) -> float:
     """沿用 macOS 原版：目标在右侧时为负角，左侧时为正角。"""
     return -radians if dx >= 0 else radians

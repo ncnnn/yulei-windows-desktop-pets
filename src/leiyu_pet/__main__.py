@@ -9,6 +9,7 @@ import logging
 import random
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 from . import __version__
@@ -100,10 +101,18 @@ def apply_config(runtime, settings) -> None:
     controller.set_include_explicit(settings.include_explicit)
     controller.set_tilt_enabled(settings.tilt_enabled)
     controller.set_crosstalk_lines(settings.crosstalk_lines)
+    controller.set_overlap_easter_egg(settings.overlap_easter_egg)
 
     runtime.set_pet_size("lei", settings.lei_size)
     runtime.set_pet_size("yu", settings.yu_size)
     runtime.set_rate(settings.playback_rate)
+    runtime.set_opacity(settings.opacity)
+    runtime.set_caption_font_size(settings.caption_font_size)
+    runtime.set_always_on_top(settings.always_on_top)
+    runtime.set_wander_enabled(
+        settings.wander_enabled,
+        settings.wander_interval_seconds,
+    )
 
     runtime.set_role_visible("lei", settings.lei_visible)
     runtime.set_role_visible("yu", settings.yu_visible)
@@ -112,6 +121,20 @@ def apply_config(runtime, settings) -> None:
         window.set_locked(settings.lock_position)
         window.set_click_through(settings.click_through)
         window.set_reduce_motion(settings.reduce_motion)
+
+    from .quiet_hours import in_quiet_hours
+
+    assistant = runtime.assistant
+    assistant.configure(
+        hourly=settings.hourly_chime,
+        break_minutes=settings.break_reminder_minutes,
+        focus_minutes=settings.pomodoro_focus_minutes,
+        rest_minutes=settings.pomodoro_break_minutes,
+    )
+    assistant.set_quiet_checker(
+        lambda: bool(settings.quiet_hours_enabled)
+        and in_quiet_hours(datetime.now(), settings.quiet_start, settings.quiet_end)
+    )
 
 
 def restore_window_positions(runtime, settings) -> None:
@@ -271,6 +294,17 @@ def main(argv: list[str] | None = None) -> int:
     runtime.controller.notice.connect(
         lambda message: tray.notify("提示", message)
     )
+
+    def show_assistant_notice(message: str) -> None:
+        """提醒优先用静音气泡；两只都隐藏时退回托盘气泡。"""
+        role = random.choice(("lei", "yu"))
+        if not runtime.controller.show_notice(role, message):
+            tray.notify("提醒", message)
+
+    runtime.assistant.notice.connect(show_assistant_notice)
+    runtime.assistant.pomodoro_changed.connect(
+        lambda stage: logger.info("番茄钟状态：%s", stage)
+    )
     logging_setup.install_excepthook(
         logger,
         notify=lambda title, message: tray.notify(title, message, warning=True),
@@ -294,6 +328,8 @@ def main(argv: list[str] | None = None) -> int:
                     runtime.controller.start_crosstalk()
             elif action == "random_line":
                 runtime.controller.play_solo(random.choice(("lei", "yu")))
+            elif action == "mute":
+                runtime.toggle_mute()
             elif action == "stop":
                 runtime.controller.stop_all()
 

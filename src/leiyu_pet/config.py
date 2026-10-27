@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 DEFAULTS: dict[str, object] = {
-    "version": 2,
+    "version": 3,
     "volume": 0.65,
     "distance": 32,
     "tilt_enabled": True,
@@ -39,12 +39,29 @@ DEFAULTS: dict[str, object] = {
     "lei_size": 220,
     "yu_size": 220,
     "playback_rate": 1.0,
+    # 外观
+    "caption_font_size": 11,
+    "opacity": 1.0,
+    "always_on_top": True,
+    # 免打扰时段
+    "quiet_hours_enabled": False,
+    "quiet_start": "23:00",
+    "quiet_end": "08:00",
+    # 提醒与番茄钟
+    "hourly_chime": False,
+    "break_reminder_minutes": 0,
+    "pomodoro_focus_minutes": 25,
+    "pomodoro_break_minutes": 5,
+    # 自动游走与重叠彩蛋
+    "wander_enabled": False,
+    "wander_interval_seconds": 45,
+    "overlap_easter_egg": False,
 }
 
 
 @dataclass(slots=True)
 class Config:
-    version: int = 2
+    version: int = 3
     volume: float = 0.65
     distance: int = 32
     tilt_enabled: bool = True
@@ -65,6 +82,19 @@ class Config:
     lei_size: int = 220
     yu_size: int = 220
     playback_rate: float = 1.0
+    caption_font_size: int = 11
+    opacity: float = 1.0
+    always_on_top: bool = True
+    quiet_hours_enabled: bool = False
+    quiet_start: str = "23:00"
+    quiet_end: str = "08:00"
+    hourly_chime: bool = False
+    break_reminder_minutes: int = 0
+    pomodoro_focus_minutes: int = 25
+    pomodoro_break_minutes: int = 5
+    wander_enabled: bool = False
+    wander_interval_seconds: int = 45
+    overlap_easter_egg: bool = False
 
 
 def _defaults() -> dict[str, object]:
@@ -99,6 +129,16 @@ def _coerce(key: str, value: object) -> object:
             return min(max(number, 2), 20)
         if key in {"lei_size", "yu_size"}:
             return min(max(number, 150), 340)
+        if key == "caption_font_size":
+            return min(max(number, 9), 20)
+        if key == "break_reminder_minutes":
+            return min(max(number, 0), 240)
+        if key == "pomodoro_focus_minutes":
+            return min(max(number, 5), 120)
+        if key == "pomodoro_break_minutes":
+            return min(max(number, 1), 60)
+        if key == "wander_interval_seconds":
+            return min(max(number, 10), 600)
         return number
     if isinstance(default, float):
         try:
@@ -109,7 +149,16 @@ def _coerce(key: str, value: object) -> object:
             return min(max(number, 0.0), 1.0)
         if key == "playback_rate":
             return min(max(number, 0.5), 2.0)
+        if key == "opacity":
+            return min(max(number, 0.3), 1.0)
         return number
+    if isinstance(default, str):
+        if key in {"quiet_start", "quiet_end"}:
+            from .quiet_hours import normalize_hhmm
+
+            text = value if isinstance(value, str) else ""
+            return normalize_hhmm(text, str(default))
+        return value
     return value
 
 

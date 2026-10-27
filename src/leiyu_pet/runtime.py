@@ -5,15 +5,17 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import cast
 
-from PySide6.QtCore import QObject, QPoint, QRect
+from PySide6.QtCore import QObject, QPoint, QRect, QTimer
 from PySide6.QtGui import QGuiApplication
 
+from .assistant import PetAssistant
 from .audio import AudioCoordinator
 from .context_menu import ContextMenuManager
 from .models import AssetPack, Role
 from .pet_controller import PetController
 from .pet_window import PetWindow
 from .platform_win import keep_window_on_screen
+from .wander import PlayArea, clamp_position, next_target
 
 
 class PetRuntime(QObject):
@@ -31,15 +33,28 @@ class PetRuntime(QObject):
         self.audio = audio or AudioCoordinator(parent=self)
         self.volume = 0.65
         self.audio.set_volume(self.volume)
+        self._volume_before_mute = self.volume
         self.controller = PetController(pack, self.windows, self.audio, parent=self)
         self.menu_manager = ContextMenuManager(self)
+        #: 整点/久坐/番茄钟的统一入口。
+        self.assistant = PetAssistant(parent=self)
         #: 由主程序注入：右键菜单「设置…」的入口。
         self.on_open_settings = None
         #: 由主程序注入：用于把尺寸/速度等改动写回配置。
         self.config = None
 
+        # 自动游走：先按间隔挑落点，再用 30ms 小步移动过去。
+        self._wander_interval_seconds = 45
+        self._wander_targets: dict[Role, QPoint] = {}
+        self._wander_timer = QTimer(self)
+        self._wander_timer.timeout.connect(self._plan_wander)
+        self._wander_step_timer = QTimer(self)
+        self._wander_step_timer.setInterval(30)
+        self._wander_step_timer.timeout.connect(self._advance_wander)
+
         for _role, window in self.windows.items():
             window.click.connect(self.controller.handle_click)
+            window.double_click.connect(self.controller.handle_double_click)
             window.context.connect(self._show_context)
             if show:
                 window.show()
@@ -58,8 +73,113 @@ class PetRuntime(QObject):
         self.menu_manager.show(cast(Role, role), position)
 
     def set_volume(self, volume: float) -> None:
-        self.volume = min(max(float(volume), 0.0), 1.0)
+        next_volume = min(max(float(volume), 0.0), 1.0)
+        if next_volume > 0.001:
+            self._volume_before_mute = next_volume
+        self.volume = next_volume
         self.controller.set_volume(self.volume)
+
+    def toggle_mute(self) -> bool:
+        """静音/恢复。返回切换后是否处于静音。"""
+        if self.volume > 0.001:
+            self._volume_before_mute = self.volume
+            self.set_volume(0.0)
+        else:
+            self.set_volume(self._volume_before_mute or 0.65)
+        self._persist_setting("volume", self.volume)
+        return self.volume <= 0.001
+
+    @property
+    def muted(self) -> bool:
+        return self.volume <= 0.001
+
+    def set_opacity(self, value: float) -> None:
+        opacity = min(max(float(value), 0.3), 1.0)
+        for window in self.windows.values():
+            window.set_opacity(opacity)
+        self._persist_setting("opacity", opacity)
+
+    def set_caption_font_size(self, value: int) -> None:
+        size = min(max(int(value), 9), 20)
+        for window in self.windows.values():
+            widget = getattr(window, "caption_widget", None)
+            if widget is not None:
+                widget.set_font_size(size)
+        self._persist_setting("caption_font_size", size)
+
+    def set_always_on_top(self, value: bool) -> None:
+        for window in self.windows.values():
+            window.set_always_on_top(bool(value))
+        self._persist_setting("always_on_top", bool(value))
+
+    def set_wander_enabled(self, enabled: bool, interval_seconds: int | None = None) -> None:
+        if interval_seconds is not None:
+            self._wander_interval_seconds = min(max(int(interval_seconds), 10), 600)
+        self._persist_setting("wander_enabled", bool(enabled))
+        self._persist_setting("wander_interval_seconds", self._wander_interval_seconds)
+        if enabled:
+            self._wander_timer.start(self._wander_interval_seconds * 1000)
+        else:
+            self._wander_timer.stop()
+            self._wander_targets.clear()
+            self._wander_step_timer.stop()
+
+    def _play_area(self) -> PlayArea | None:
+        screen = QGuiApplication.primaryScreen()
+        if screen is None:
+            return None
+        area = screen.availableGeometry()
+        return PlayArea(area.x(), area.y(), area.width(), area.height())
+
+    def _plan_wander(self) -> None:
+        """给每只可见、未被拖动的桌宠挑一个新落点。"""
+        if self._wander_targets or self.controller.is_busy():
+            return
+        area = self._play_area()
+        if area is None:
+            return
+        for role, window in self.windows.items():
+            if not window.isVisible() or getattr(window, "dragging", False):
+                continue
+            if getattr(window, "locked", False):
+                continue
+            target = next_target(
+                (window.x(), window.y()),
+                window.width(),
+                window.height(),
+                area,
+            )
+            self._wander_targets[role] = QPoint(*target)
+        if self._wander_targets:
+            self._wander_step_timer.start()
+
+    def _advance_wander(self) -> None:
+        """按剩余距离的比例小步靠近目标，到点即移除。"""
+        if not self._wander_targets:
+            self._wander_step_timer.stop()
+            return
+        area = self._play_area()
+        for role in list(self._wander_targets):
+            window = self.windows[role]
+            target = self._wander_targets[role]
+            if not window.isVisible() or getattr(window, "dragging", False):
+                self._wander_targets.pop(role, None)
+                continue
+            dx = target.x() - window.x()
+            dy = target.y() - window.y()
+            if abs(dx) <= 2 and abs(dy) <= 2:
+                self._wander_targets.pop(role, None)
+                continue
+            step_x = window.x() + int(dx * 0.08) + (1 if dx > 0 else -1 if dx < 0 else 0)
+            step_y = window.y() + int(dy * 0.08) + (1 if dy > 0 else -1 if dy < 0 else 0)
+            if area is not None:
+                step_x, step_y = clamp_position(
+                    step_x, step_y, window.width(), window.height(), area
+                )
+            window.move(step_x, step_y)
+        if not self._wander_targets:
+            self._wander_step_timer.stop()
+        self.controller.update_proximity()
 
     def set_distance(self, distance: float) -> None:
         self.controller.set_distance(distance)
@@ -147,6 +267,9 @@ class PetRuntime(QObject):
         return restored
 
     def close(self) -> None:
+        self._wander_timer.stop()
+        self._wander_step_timer.stop()
+        self.assistant.stop_polling()
         self.controller.stop_all()
         self.controller.timer.stop()
         for window in self.windows.values():

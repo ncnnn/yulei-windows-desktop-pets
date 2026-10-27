@@ -25,6 +25,14 @@ SHAKE_DURATION = 0.36
 SHAKE_AMPLITUDE = 7.0
 SHAKE_CYCLES = 3.0
 
+#: 点头 / 挥手 / 转圈关键帧参数。
+NOD_DURATION = 0.42
+NOD_DEPTH = 14.0
+WAVE_DURATION = 0.60
+WAVE_AMPLITUDE = 10.0
+WAVE_CYCLES = 2.0
+SPIN_DURATION = 0.75
+
 
 def jump_offset(progress: float) -> float:
     """跳跃关键帧：抛物线，0→最高点→0，progress 取 0..1。"""
@@ -36,6 +44,27 @@ def shake_offset(progress: float) -> float:
     """抖动关键帧：衰减正弦，左右晃动后归零。"""
     p = min(max(progress, 0.0), 1.0)
     return SHAKE_AMPLITUDE * math.sin(p * math.pi * 2.0 * SHAKE_CYCLES) * (1.0 - p)
+
+
+def nod_offset(progress: float) -> float:
+    """点头关键帧：向下沉一下再回来（返回值按「向下」为正）。"""
+    p = min(max(progress, 0.0), 1.0)
+    if p <= 0.0 or p >= 1.0:
+        return 0.0
+    return NOD_DEPTH * math.sin(math.pi * p)
+
+
+def wave_offset(progress: float) -> float:
+    """挥手关键帧：左右摆动，幅度逐渐衰减。"""
+    p = min(max(progress, 0.0), 1.0)
+    return WAVE_AMPLITUDE * math.sin(p * math.pi * 2.0 * WAVE_CYCLES) * (1.0 - p)
+
+
+def spin_angle(progress: float) -> float:
+    """转圈关键帧：平滑地转满一圈（弧度）。"""
+    p = min(max(progress, 0.0), 1.0)
+    eased = p * p * (3.0 - 2.0 * p)
+    return math.tau * eased
 
 
 def ease_towards(current: float, target: float, factor: float = TILT_EASING) -> float:
@@ -64,17 +93,24 @@ def bob_for(pulse: float) -> float:
 
 @dataclass(frozen=True, slots=True)
 class Pose:
-    """一帧的绘制姿态。angle 为弧度，bob 为向上像素偏移。"""
+    """一帧的绘制姿态。angle 为倾斜弧度，bob 为向上像素偏移。"""
 
     angle: float = 0.0
     compression: float = 1.0
     bob: float = 0.0
     offset_x: float = 0.0
     offset_y: float = 0.0
+    spin: float = 0.0
 
     @property
     def angle_degrees(self) -> float:
+        """仅倾斜角（不含转圈），便于单独断言。"""
         return math.degrees(self.angle)
+
+    @property
+    def render_angle_degrees(self) -> float:
+        """绘制时真正使用的角度：倾斜 + 转圈。"""
+        return math.degrees(self.angle + self.spin)
 
 
 @dataclass(slots=True)
@@ -86,6 +122,9 @@ class AnimationState:
     reduce_motion: bool = False
     jump_progress: float = 1.0
     shake_progress: float = 1.0
+    nod_progress: float = 1.0
+    wave_progress: float = 1.0
+    spin_progress: float = 1.0
 
     @property
     def pulse(self) -> float:
@@ -102,8 +141,9 @@ class AnimationState:
             self.angle,
             compression_for(self.pulse),
             bob_for(self.pulse),
-            shake_offset(self.shake_progress),
-            jump_offset(self.jump_progress),
+            shake_offset(self.shake_progress) + wave_offset(self.wave_progress),
+            jump_offset(self.jump_progress) - nod_offset(self.nod_progress),
+            spin_angle(self.spin_progress),
         )
 
     def set_target_angle(self, value: float) -> None:
@@ -127,6 +167,21 @@ class AnimationState:
         if not self.reduce_motion:
             self.shake_progress = 0.0
 
+    def nod(self) -> None:
+        """播放一次点头关键帧（开始说话时的回应）。"""
+        if not self.reduce_motion:
+            self.nod_progress = 0.0
+
+    def wave(self) -> None:
+        """播放一次挥手关键帧（打招呼）。"""
+        if not self.reduce_motion:
+            self.wave_progress = 0.0
+
+    def spin(self) -> None:
+        """播放一次转圈关键帧（双击彩蛋）。"""
+        if not self.reduce_motion:
+            self.spin_progress = 0.0
+
     def advance(self) -> Pose:
         """推进一帧（30fps 语义），返回推进后的姿态。"""
         if self.reduce_motion:
@@ -134,6 +189,9 @@ class AnimationState:
             self.phase = 0.0
             self.jump_progress = 1.0
             self.shake_progress = 1.0
+            self.nod_progress = 1.0
+            self.wave_progress = 1.0
+            self.spin_progress = 1.0
             return self.pose
         self.angle = ease_towards(self.angle, self.target_angle)
         if self.speaking:
@@ -142,6 +200,9 @@ class AnimationState:
             self.phase = 0.0
         self.jump_progress = min(1.0, self.jump_progress + FRAME_SECONDS / JUMP_DURATION)
         self.shake_progress = min(1.0, self.shake_progress + FRAME_SECONDS / SHAKE_DURATION)
+        self.nod_progress = min(1.0, self.nod_progress + FRAME_SECONDS / NOD_DURATION)
+        self.wave_progress = min(1.0, self.wave_progress + FRAME_SECONDS / WAVE_DURATION)
+        self.spin_progress = min(1.0, self.spin_progress + FRAME_SECONDS / SPIN_DURATION)
         return self.pose
 
     def reset(self) -> None:
@@ -151,3 +212,6 @@ class AnimationState:
         self.speaking = False
         self.jump_progress = 1.0
         self.shake_progress = 1.0
+        self.nod_progress = 1.0
+        self.wave_progress = 1.0
+        self.spin_progress = 1.0

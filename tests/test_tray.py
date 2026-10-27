@@ -117,6 +117,7 @@ class FakeWindow:
     def set_click_through(self, value):
         self._click_through = bool(value)
 
+    @property
     def click_through(self):
         return self._click_through
 
@@ -128,8 +129,16 @@ class FakeController:
         self.tilt_enabled = True
         self.crosstalk_lines = 6
         self.playback_rate = 1.0
+        self.overlap_enabled = False
         self.proximity = types.SimpleNamespace(distance=32.0)
         self.calls = []
+
+    def recent(self, role, limit=6):
+        return []
+
+    def set_overlap_easter_egg(self, value):
+        self.calls.append(("set_overlap_easter_egg", value))
+        self.overlap_enabled = bool(value)
 
     def play_solo(self, role, clip_id=None):
         self.calls.append(("play_solo", role, clip_id))
@@ -185,7 +194,19 @@ class FakeRuntime:
         }
         self.controller = FakeController()
         self.controller.tilt_enabled = tilt
+        self.assistant = None
         self.calls = []
+
+    @property
+    def muted(self):
+        return self.volume <= 0.001
+
+    def toggle_mute(self):
+        self.volume = 0.0 if self.volume > 0.001 else 0.65
+        self.calls.append(("toggle_mute", self.volume))
+
+    def set_wander_enabled(self, enabled, interval_seconds=None):
+        self.calls.append(("set_wander_enabled", enabled, interval_seconds))
 
     def set_volume(self, value):
         self.volume = min(max(float(value), 0.0), 1.0)

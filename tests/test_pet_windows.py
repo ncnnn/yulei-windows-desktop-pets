@@ -453,3 +453,60 @@ def test_window_caption_round_trip(pet: PetWindow) -> None:
     assert pet.caption() == "雷：你好"
     pet.set_caption("  ")
     assert pet.caption() == ""
+
+
+# ------------------------------------------------------- 新增关键帧 / 窗口能力
+
+
+def test_nod_wave_spin_keyframes() -> None:
+    from leiyu_pet.animation import AnimationState, nod_offset, spin_angle, wave_offset
+
+    assert nod_offset(0.0) == 0.0
+    assert nod_offset(0.5) == pytest.approx(14.0)
+    assert wave_offset(0.0) == pytest.approx(0.0)
+    assert wave_offset(1.0) == pytest.approx(0.0)
+    assert spin_angle(0.0) == pytest.approx(0.0)
+    assert spin_angle(1.0) == pytest.approx(2 * math.pi)
+
+    state = AnimationState()
+    state.nod()
+    assert state.advance().offset_y < 0  # 向下沉
+    state.wave()
+    assert state.advance().offset_x > 0
+    state.spin()
+    assert state.advance().render_angle_degrees > 0
+    for _ in range(60):
+        state.advance()
+    assert state.pose.render_angle_degrees == pytest.approx(360.0)
+    assert state.pose.offset_x == pytest.approx(0.0, abs=1e-6)
+    assert state.pose.offset_y == pytest.approx(0.0, abs=1e-6)
+
+
+def test_double_click_emits_role(pet: PetWindow, qtbot) -> None:
+    seen: list[str] = []
+    pet.double_click.connect(seen.append)
+    spot = center_point(pet)
+    with qtbot.waitSignal(pet.double_click, timeout=1000):
+        send(pet, QEvent.Type.MouseButtonDblClick, spot)
+    assert seen == ["lei"]
+
+
+def test_always_on_top_can_be_toggled(pet: PetWindow) -> None:
+    assert pet.always_on_top is True
+    pet.set_always_on_top(False)
+    assert pet.always_on_top is False
+    assert not has_flag(pet.windowFlags(), Qt.WindowType.WindowStaysOnTopHint)
+    pet.set_always_on_top(True)
+    assert has_flag(pet.windowFlags(), Qt.WindowType.WindowStaysOnTopHint)
+
+
+def test_hiding_pauses_animation_timer(qtbot) -> None:
+    window = PetWindow("lei", animate=True)
+    qtbot.addWidget(window)
+    window.show()
+    assert window._timer.isActive()
+    window.hide()
+    assert not window._timer.isActive()
+    window.show()
+    assert window._timer.isActive()
+    window.close()

@@ -11,6 +11,7 @@ from .config import Config, save_config
 from .context_menu import ROLE_NAMES
 from .crosstalk import LINE_PRESETS
 from .paths import config_path
+from .reminders import BREAK_PRESETS
 
 ROLES = ("lei", "yu")
 DISTANCE_VALUES = (8, 32, 80)
@@ -148,6 +149,24 @@ class TrayManager(QObject):
         )
         self._add_action(self._menu, "两人对话一句", rt.controller.start_pair)
 
+        history_menu = self._menu.addMenu("最近说过")
+        self._submenus.append(history_menu)
+        for role in ROLES:
+            role_history = history_menu.addMenu(f"{ROLE_NAMES[role]}最近说过")
+            self._submenus.append(role_history)
+            entries = rt.controller.recent(role, 6)
+            if not entries:
+                empty = role_history.addAction("暂无记录")
+                empty.setEnabled(False)
+                continue
+            for clip_id, text in reversed(entries):
+                label = text.replace("\n", " ")
+                self._add_action(
+                    role_history,
+                    label[:28] + ("…" if len(label) > 28 else ""),
+                    lambda _checked=False, r=role, cid=clip_id: rt.controller.play_solo(r, cid),
+                )
+
         crosstalk_menu = self._menu.addMenu("相声模式")
         self._submenus.append(crosstalk_menu)
         self._add_action(crosstalk_menu, "开始（两只交替连续说）", self._start_crosstalk)
@@ -161,6 +180,52 @@ class TrayManager(QObject):
         )
 
         self._add_action(self._menu, "停止播放", rt.controller.stop_all)
+        self._add_action(
+            self._menu,
+            "恢复声音" if getattr(rt, "muted", False) else "静音",
+            rt.toggle_mute,
+        )
+
+        focus_menu = self._menu.addMenu("番茄钟")
+        self._submenus.append(focus_menu)
+        self._add_action(focus_menu, "开始专注", self._start_pomodoro)
+        self._add_action(focus_menu, "停止计时", self._stop_pomodoro)
+        assistant = getattr(rt, "assistant", None)
+        if assistant is not None:
+            focus_menu.addSeparator()
+            status = focus_menu.addAction(assistant.pomodoro_status())
+            status.setEnabled(False)
+
+        reminder_menu = self._menu.addMenu("提醒")
+        self._submenus.append(reminder_menu)
+        self._add_action(
+            reminder_menu,
+            "整点报时",
+            self._toggle_hourly,
+            checkable=True,
+            pass_checked=True,
+            checked=bool(getattr(self.config, "hourly_chime", False)),
+        )
+        break_menu = reminder_menu.addMenu("久坐提醒")
+        self._submenus.append(break_menu)
+        self._add_radio_group(
+            break_menu,
+            BREAK_PRESETS,
+            label_of=lambda minutes: "关闭" if minutes == 0 else f"{minutes} 分钟",
+            is_checked=lambda minutes: int(
+                getattr(self.config, "break_reminder_minutes", 0)
+            )
+            == minutes,
+            on_trigger=self._set_break_minutes,
+        )
+        self._add_action(
+            reminder_menu,
+            "免打扰时段",
+            self._toggle_quiet,
+            checkable=True,
+            pass_checked=True,
+            checked=bool(getattr(self.config, "quiet_hours_enabled", False)),
+        )
         self._menu.addSeparator()
 
         voice_menu = self._menu.addMenu("声音模式")
@@ -224,6 +289,22 @@ class TrayManager(QObject):
             pass_checked=True,
             checked=rt.controller.tilt_enabled,
         )
+        self._add_action(
+            self._menu,
+            "自动游走",
+            self._toggle_wander,
+            checkable=True,
+            pass_checked=True,
+            checked=bool(getattr(self.config, "wander_enabled", False)),
+        )
+        self._add_action(
+            self._menu,
+            "重叠时自动对喷",
+            self._toggle_overlap,
+            checkable=True,
+            pass_checked=True,
+            checked=bool(getattr(self.config, "overlap_easter_egg", False)),
+        )
         self._menu.addSeparator()
 
         self._add_action(
@@ -260,6 +341,58 @@ class TrayManager(QObject):
         self.runtime.controller.set_crosstalk_lines(lines)
         self.config.crosstalk_lines = int(lines)
         save_config(self.config, config_path())
+
+    def _start_pomodoro(self) -> None:
+        assistant = getattr(self.runtime, "assistant", None)
+        if assistant is None:
+            return
+        if not assistant.start_pomodoro():
+            self.notify("番茄钟", "已经在计时了")
+        else:
+            self.notify("番茄钟", f"开始专注 {assistant.pomodoro.focus_minutes} 分钟")
+
+    def _stop_pomodoro(self) -> None:
+        assistant = getattr(self.runtime, "assistant", None)
+        if assistant is not None:
+            assistant.stop_pomodoro()
+
+    def _configure_assistant(self) -> None:
+        assistant = getattr(self.runtime, "assistant", None)
+        if assistant is None:
+            return
+        assistant.configure(
+            hourly=bool(getattr(self.config, "hourly_chime", False)),
+            break_minutes=int(getattr(self.config, "break_reminder_minutes", 0)),
+            focus_minutes=int(getattr(self.config, "pomodoro_focus_minutes", 25)),
+            rest_minutes=int(getattr(self.config, "pomodoro_break_minutes", 5)),
+        )
+
+    def _toggle_hourly(self, checked: bool) -> None:
+        self.config.hourly_chime = bool(checked)
+        save_config(self.config, config_path())
+        self._configure_assistant()
+
+    def _set_break_minutes(self, minutes: int) -> None:
+        self.config.break_reminder_minutes = int(minutes)
+        save_config(self.config, config_path())
+        self._configure_assistant()
+
+    def _toggle_quiet(self, checked: bool) -> None:
+        self.config.quiet_hours_enabled = bool(checked)
+        save_config(self.config, config_path())
+
+    def _toggle_wander(self, checked: bool) -> None:
+        self.config.wander_enabled = bool(checked)
+        save_config(self.config, config_path())
+        self.runtime.set_wander_enabled(
+            bool(checked),
+            int(getattr(self.config, "wander_interval_seconds", 45)),
+        )
+
+    def _toggle_overlap(self, checked: bool) -> None:
+        self.config.overlap_easter_egg = bool(checked)
+        save_config(self.config, config_path())
+        self.runtime.controller.set_overlap_easter_egg(bool(checked))
 
     def _toggle_autostart(self, checked: bool) -> None:
         try:

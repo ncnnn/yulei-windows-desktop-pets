@@ -6,7 +6,8 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTime, QUrl
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -18,6 +19,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSlider,
     QTabWidget,
+    QTimeEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -28,6 +30,9 @@ from .config import Config, save_config
 from .context_menu import ROLE_NAMES
 from .crosstalk import LINE_PRESETS
 from .hotkeys import ACTION_LABELS, DEFAULT_BINDINGS, describe_binding
+from .pomodoro import BREAK_PRESETS as POMODORO_BREAKS
+from .pomodoro import FOCUS_PRESETS
+from .reminders import BREAK_PRESETS
 
 ROLES = ("lei", "yu")
 DISTANCES = ((8, "贴近"), (32, "靠近"), (80, "较远"))
@@ -101,6 +106,22 @@ class SettingsDialog(QDialog):
         self.rate_combo.currentIndexChanged.connect(self._on_rate)
         form.addRow("播放速度", self.rate_combo)
 
+        self.caption_size_slider = QSlider(Qt.Orientation.Horizontal)
+        self.caption_size_slider.setObjectName("caption_font_size")
+        self.caption_size_slider.setRange(9, 20)
+        self.caption_size_slider.setValue(int(getattr(self.config, "caption_font_size", 11)))
+        self.caption_size_slider.valueChanged.connect(self._on_caption_size)
+        form.addRow("字幕字号", self.caption_size_slider)
+
+        self.opacity_slider = QSlider(Qt.Orientation.Horizontal)
+        self.opacity_slider.setObjectName("opacity")
+        self.opacity_slider.setRange(30, 100)
+        self.opacity_slider.setValue(
+            round(float(getattr(self.config, "opacity", 1.0)) * 100)
+        )
+        self.opacity_slider.valueChanged.connect(self._on_opacity)
+        form.addRow("窗口透明度", self.opacity_slider)
+
         self.explicit_check = QCheckBox("允许第 17 段（含粗口）")
         self.explicit_check.setObjectName("explicit")
         self.explicit_check.setChecked(self.runtime.controller.include_explicit)
@@ -161,6 +182,69 @@ class SettingsDialog(QDialog):
         self.reduce_motion_check.setChecked(self.config.reduce_motion)
         self.reduce_motion_check.toggled.connect(self._on_reduce_motion)
         form.addRow(self.reduce_motion_check)
+
+        self.wander_check = QCheckBox("空闲时自动在屏幕上溜达")
+        self.wander_check.setObjectName("wander")
+        self.wander_check.setChecked(bool(getattr(self.config, "wander_enabled", False)))
+        self.wander_check.toggled.connect(self._on_wander)
+        form.addRow(self.wander_check)
+
+        self.wander_interval_combo = QComboBox()
+        self.wander_interval_combo.setObjectName("wander_interval")
+        for seconds, label in ((30, "30 秒"), (45, "45 秒"), (90, "90 秒"), (180, "3 分钟")):
+            self.wander_interval_combo.addItem(label, seconds)
+        current_interval = int(getattr(self.config, "wander_interval_seconds", 45))
+        self.wander_interval_combo.setCurrentIndex(
+            max(self.wander_interval_combo.findData(current_interval), 0)
+        )
+        self.wander_interval_combo.currentIndexChanged.connect(self._on_wander_interval)
+        form.addRow("游走间隔", self.wander_interval_combo)
+
+        self.overlap_check = QCheckBox("两只叠在一起时自动来一段问答")
+        self.overlap_check.setObjectName("overlap")
+        self.overlap_check.setChecked(
+            bool(getattr(self.config, "overlap_easter_egg", False))
+        )
+        self.overlap_check.toggled.connect(self._on_overlap)
+        form.addRow(self.overlap_check)
+
+        self.hourly_check = QCheckBox("整点报时（静音气泡，不发声）")
+        self.hourly_check.setObjectName("hourly_chime")
+        self.hourly_check.setChecked(bool(getattr(self.config, "hourly_chime", False)))
+        self.hourly_check.toggled.connect(self._on_hourly)
+        form.addRow(self.hourly_check)
+
+        self.break_reminder_combo = QComboBox()
+        self.break_reminder_combo.setObjectName("break_reminder")
+        for minutes in BREAK_PRESETS:
+            label = "关闭" if minutes == 0 else f"{minutes} 分钟"
+            self.break_reminder_combo.addItem(label, minutes)
+        current_break = int(getattr(self.config, "break_reminder_minutes", 0))
+        self.break_reminder_combo.setCurrentIndex(
+            max(self.break_reminder_combo.findData(current_break), 0)
+        )
+        self.break_reminder_combo.currentIndexChanged.connect(self._on_break_reminder)
+        form.addRow("久坐提醒", self.break_reminder_combo)
+
+        self.focus_combo = QComboBox()
+        self.focus_combo.setObjectName("pomodoro_focus")
+        for minutes in FOCUS_PRESETS:
+            self.focus_combo.addItem(f"{minutes} 分钟", minutes)
+        current_focus = int(getattr(self.config, "pomodoro_focus_minutes", 25))
+        self.focus_combo.setCurrentIndex(max(self.focus_combo.findData(current_focus), 0))
+        self.focus_combo.currentIndexChanged.connect(self._on_pomodoro_times)
+        form.addRow("番茄钟专注时长", self.focus_combo)
+
+        self.pomodoro_break_combo = QComboBox()
+        self.pomodoro_break_combo.setObjectName("pomodoro_break")
+        for minutes in POMODORO_BREAKS:
+            self.pomodoro_break_combo.addItem(f"{minutes} 分钟", minutes)
+        current_rest = int(getattr(self.config, "pomodoro_break_minutes", 5))
+        self.pomodoro_break_combo.setCurrentIndex(
+            max(self.pomodoro_break_combo.findData(current_rest), 0)
+        )
+        self.pomodoro_break_combo.currentIndexChanged.connect(self._on_pomodoro_times)
+        form.addRow("番茄钟休息时长", self.pomodoro_break_combo)
         return page
 
     # ---------------------------------------------------------------- 系统
@@ -203,9 +287,17 @@ class SettingsDialog(QDialog):
         window_group = QGroupBox("窗口行为")
         window_form = QFormLayout(window_group)
 
+        self.always_on_top_check = QCheckBox("始终置顶（关闭后会被其它窗口盖住）")
+        self.always_on_top_check.setObjectName("always_on_top")
+        self.always_on_top_check.setChecked(bool(getattr(self.config, "always_on_top", True)))
+        self.always_on_top_check.toggled.connect(self._on_always_on_top)
+        window_form.addRow(self.always_on_top_check)
+
         self.click_through_check = QCheckBox("鼠标穿透（点击落到下层窗口）")
         self.click_through_check.setObjectName("click_through")
-        self.click_through_check.setChecked(self.runtime.windows["lei"].click_through())
+        self.click_through_check.setChecked(
+            bool(self.runtime.windows["lei"].click_through)
+        )
         self.click_through_check.toggled.connect(self._on_click_through)
         window_form.addRow(self.click_through_check)
 
@@ -219,6 +311,39 @@ class SettingsDialog(QDialog):
         reset_button.clicked.connect(self._reset_positions)
         window_form.addRow(reset_button)
         layout.addWidget(window_group)
+
+        quiet_group = QGroupBox("免打扰时段")
+        quiet_form = QFormLayout(quiet_group)
+        self.quiet_check = QCheckBox("在该时段内不提醒、不弹气泡")
+        self.quiet_check.setObjectName("quiet_hours")
+        self.quiet_check.setChecked(bool(getattr(self.config, "quiet_hours_enabled", False)))
+        self.quiet_check.toggled.connect(self._on_quiet)
+        quiet_form.addRow(self.quiet_check)
+
+        self.quiet_start_edit = QTimeEdit()
+        self.quiet_start_edit.setObjectName("quiet_start")
+        self.quiet_start_edit.setDisplayFormat("HH:mm")
+        self.quiet_start_edit.setTime(
+            QTime.fromString(str(getattr(self.config, "quiet_start", "23:00")), "HH:mm")
+        )
+        self.quiet_start_edit.timeChanged.connect(self._on_quiet_times)
+        quiet_form.addRow("开始", self.quiet_start_edit)
+
+        self.quiet_end_edit = QTimeEdit()
+        self.quiet_end_edit.setObjectName("quiet_end")
+        self.quiet_end_edit.setDisplayFormat("HH:mm")
+        self.quiet_end_edit.setTime(
+            QTime.fromString(str(getattr(self.config, "quiet_end", "08:00")), "HH:mm")
+        )
+        self.quiet_end_edit.timeChanged.connect(self._on_quiet_times)
+        quiet_form.addRow("结束", self.quiet_end_edit)
+        layout.addWidget(quiet_group)
+
+        data_button = QPushButton("打开数据目录")
+        data_button.clicked.connect(
+            lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(paths.base_dir())))
+        )
+        layout.addWidget(data_button)
         layout.addStretch(1)
         return page
 
@@ -287,6 +412,88 @@ class SettingsDialog(QDialog):
         rate = float(self.rate_combo.itemData(index))
         self.runtime.set_rate(rate)
         self.config.playback_rate = rate
+        self._persist()
+
+    def _on_caption_size(self, value: int) -> None:
+        setter = getattr(self.runtime, "set_caption_font_size", None)
+        if callable(setter):
+            setter(value)
+        self.config.caption_font_size = int(value)
+        self._persist()
+
+    def _on_opacity(self, value: int) -> None:
+        opacity = max(0.3, min(value / 100, 1.0))
+        setter = getattr(self.runtime, "set_opacity", None)
+        if callable(setter):
+            setter(opacity)
+        self.config.opacity = opacity
+        self._persist()
+
+    def _on_wander(self, checked: bool) -> None:
+        self.config.wander_enabled = bool(checked)
+        setter = getattr(self.runtime, "set_wander_enabled", None)
+        if callable(setter):
+            setter(
+                bool(checked),
+                int(getattr(self.config, "wander_interval_seconds", 45)),
+            )
+        self._persist()
+
+    def _on_wander_interval(self, index: int) -> None:
+        seconds = int(self.wander_interval_combo.itemData(index))
+        self.config.wander_interval_seconds = seconds
+        if bool(getattr(self.config, "wander_enabled", False)):
+            setter = getattr(self.runtime, "set_wander_enabled", None)
+            if callable(setter):
+                setter(True, seconds)
+        self._persist()
+
+    def _on_overlap(self, checked: bool) -> None:
+        self.config.overlap_easter_egg = bool(checked)
+        self.runtime.controller.set_overlap_easter_egg(bool(checked))
+        self._persist()
+
+    def _on_hourly(self, checked: bool) -> None:
+        self.config.hourly_chime = bool(checked)
+        self._configure_assistant()
+        self._persist()
+
+    def _on_break_reminder(self, index: int) -> None:
+        self.config.break_reminder_minutes = int(self.break_reminder_combo.itemData(index))
+        self._configure_assistant()
+        self._persist()
+
+    def _on_pomodoro_times(self, _index: int) -> None:
+        self.config.pomodoro_focus_minutes = int(self.focus_combo.currentData())
+        self.config.pomodoro_break_minutes = int(self.pomodoro_break_combo.currentData())
+        self._configure_assistant()
+        self._persist()
+
+    def _configure_assistant(self) -> None:
+        assistant = getattr(self.runtime, "assistant", None)
+        if assistant is None:
+            return
+        assistant.configure(
+            hourly=bool(getattr(self.config, "hourly_chime", False)),
+            break_minutes=int(getattr(self.config, "break_reminder_minutes", 0)),
+            focus_minutes=int(getattr(self.config, "pomodoro_focus_minutes", 25)),
+            rest_minutes=int(getattr(self.config, "pomodoro_break_minutes", 5)),
+        )
+
+    def _on_always_on_top(self, checked: bool) -> None:
+        setter = getattr(self.runtime, "set_always_on_top", None)
+        if callable(setter):
+            setter(bool(checked))
+        self.config.always_on_top = bool(checked)
+        self._persist()
+
+    def _on_quiet(self, checked: bool) -> None:
+        self.config.quiet_hours_enabled = bool(checked)
+        self._persist()
+
+    def _on_quiet_times(self, _time=None) -> None:
+        self.config.quiet_start = self.quiet_start_edit.time().toString("HH:mm")
+        self.config.quiet_end = self.quiet_end_edit.time().toString("HH:mm")
         self._persist()
 
     def _on_reduce_motion(self, checked: bool) -> None:

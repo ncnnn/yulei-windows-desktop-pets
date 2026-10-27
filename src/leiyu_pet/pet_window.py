@@ -41,11 +41,13 @@ class PetWindow(QWidget):
 
      Signals:
         click(role): 左键点击人物本体。
+        double_click(role): 左键双击（转圈彩蛋）。
         context(role, globalPos): 右键或托盘请求菜单。
         moved(role, QPoint): 拖动后的窗口左上角屏幕坐标。
     """
 
     click = Signal(str)
+    double_click = Signal(str)
     context = Signal(str, QPoint)
     moved = Signal(str, QPoint)
 
@@ -64,6 +66,8 @@ class PetWindow(QWidget):
         self._shift_drag = False
         self._click_through = False
         self._opacity = 1.0
+        self._always_on_top = True
+        self._animate_enabled = bool(animate)
         self._dragging = False
         self._drag_dirty = False
         self._drag_offset = QPoint()
@@ -89,8 +93,7 @@ class PetWindow(QWidget):
         self._timer.timeout.connect(self.tick)
 
         self._apply_layout()
-        if animate:
-            self._timer.start()
+        # 定时器在 showEvent 里启动；未显示的窗口不跑动画，省 CPU。
 
     # ---------------------------------------------------------------- 布局
 
@@ -201,11 +204,38 @@ class PetWindow(QWidget):
         self._animation.shake()
         self.update()
 
+    def nod(self) -> None:
+        """回应反馈：播放一次点头关键帧。"""
+        self._animation.nod()
+        self.update()
+
+    def wave(self) -> None:
+        """打招呼：播放一次挥手关键帧。"""
+        self._animation.wave()
+        self.update()
+
+    def spin(self) -> None:
+        """双击彩蛋：原地转一圈。"""
+        self._animation.spin()
+        self.update()
+
     def set_animating(self, value: bool) -> None:
-        if value:
+        """总开关；关闭后即使窗口显示也不再跑 30fps 动画。"""
+        self._animate_enabled = bool(value)
+        if self._animate_enabled and self.isVisible():
             self._timer.start()
         else:
             self._timer.stop()
+
+    def showEvent(self, event) -> None:  # noqa: N802 - Qt 命名
+        super().showEvent(event)
+        if self._animate_enabled:
+            self._timer.start()
+
+    def hideEvent(self, event) -> None:  # noqa: N802 - Qt 命名
+        # 隐藏时停掉动画定时器，省 CPU；再次显示会自动恢复。
+        self._timer.stop()
+        super().hideEvent(event)
 
     def set_speaking(self, value: bool) -> None:
         self._animation.set_speaking(value)
@@ -240,7 +270,7 @@ class PetWindow(QWidget):
         return (
             QTransform()
             .translate(center_x, anchor_y)
-            .rotate(pose.angle_degrees)
+            .rotate(pose.render_angle_degrees)
             .scale(1.0, pose.compression)
             .translate(-center_x, -anchor_y)
         )
@@ -256,7 +286,7 @@ class PetWindow(QWidget):
         center_x = box.left() + box.width() / 2.0
         anchor_y = box.bottom()
         painter.translate(center_x, anchor_y)
-        painter.rotate(pose.angle_degrees)
+        painter.rotate(pose.render_angle_degrees)
         painter.scale(1.0, pose.compression)
         painter.translate(-center_x, -anchor_y)
         painter.drawPixmap(box, self._pixmap, QRectF(self._pixmap.rect()))
@@ -283,6 +313,27 @@ class PetWindow(QWidget):
     def opacity(self) -> float:
         return self._opacity
 
+    def set_always_on_top(self, value: bool) -> None:
+        """切换置顶；Qt 要求重设窗口标志后重新显示。"""
+        value = bool(value)
+        if value == self._always_on_top:
+            return
+        self._always_on_top = value
+        flags = self.windowFlags()
+        if value:
+            flags |= Qt.WindowType.WindowStaysOnTopHint
+        else:
+            flags &= ~Qt.WindowType.WindowStaysOnTopHint
+        visible = self.isVisible()
+        self.setWindowFlags(flags)
+        if visible:
+            self.show()
+            self.raise_()
+
+    @property
+    def always_on_top(self) -> bool:
+        return self._always_on_top
+
     def set_locked(self, value: bool) -> None:
         self._locked = bool(value)
         if self._locked:
@@ -291,6 +342,11 @@ class PetWindow(QWidget):
     @property
     def locked(self) -> bool:
         return self._locked
+
+    @property
+    def dragging(self) -> bool:
+        """是否正在被拖动；自动游走据此避开用户的拖拽。"""
+        return self._dragging
 
     def set_shift_drag(self, value: bool) -> None:
         self._shift_drag = bool(value)
@@ -363,6 +419,18 @@ class PetWindow(QWidget):
             self._drag_dirty = False
             self._drag_offset = local
         event.accept()
+
+    def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
+        if self._click_through:
+            return
+        if (
+            event.button() == Qt.MouseButton.LeftButton
+            and self.hit_test(event.position().toPoint())
+        ):
+            self.double_click.emit(self._role)
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         if not self._dragging:

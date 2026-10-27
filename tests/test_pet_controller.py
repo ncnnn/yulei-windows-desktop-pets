@@ -19,6 +19,8 @@ class FakeWindow:
         self.speaking = False
         self.tilt = 0.0
         self.caption = ""
+        self.spun = 0
+        self.nodded = 0
 
     def isVisible(self) -> bool:
         return self.visible
@@ -35,6 +37,12 @@ class FakeWindow:
     def set_caption(self, text: str) -> None:
         self.caption = text
 
+    def spin(self) -> None:
+        self.spun += 1
+
+    def nod(self) -> None:
+        self.nodded += 1
+
 
 class FakeAudio(QObject):
     started = Signal(str, int)
@@ -46,12 +54,15 @@ class FakeAudio(QObject):
     def __init__(self) -> None:
         super().__init__()
         self.calls: list[tuple[str, int, Path]] = []
+        self.is_playing = False
 
     def play(self, role, clip, path) -> None:
         self.calls.append((role, clip.id, path))
+        self.is_playing = True
         self.started.emit(role, clip.id)
 
     def stop(self) -> None:
+        self.is_playing = False
         self.stopped.emit()
 
     def set_volume(self, volume: float) -> None:
@@ -225,3 +236,64 @@ def test_set_rate_is_clamped_and_forwarded(asset_pack_factory) -> None:
     assert controller.playback_rate == 2.0
     controller.set_rate(0.1)
     assert controller.playback_rate == 0.5
+
+
+def test_history_records_played_clips(asset_pack_factory) -> None:
+    controller, windows, audio = build_controller(asset_pack_factory)
+    controller.play_solo("lei", 1)
+    controller.play_solo("lei", 3)
+
+    assert [clip_id for clip_id, _ in controller.recent("lei")] == [1, 3]
+    assert controller.recent("yu") == []
+    assert len(controller.recent("lei", 1)) == 1
+
+
+def test_show_notice_needs_visible_and_idle(asset_pack_factory) -> None:
+    controller, windows, audio = build_controller(asset_pack_factory)
+    assert controller.show_notice("lei", "该喝水了") is True
+    assert windows["lei"].caption == "该喝水了"
+
+    audio.is_playing = True
+    assert controller.show_notice("lei", "正在说话") is False
+    audio.is_playing = False
+
+    windows["yu"].visible = False
+    assert controller.show_notice("yu", "看不见") is False
+    assert controller.show_notice("lei", "   ") is False
+
+
+def test_double_click_spins_without_stopping_audio(asset_pack_factory) -> None:
+    controller, windows, audio = build_controller(asset_pack_factory)
+    controller.play_solo("lei", 1)
+    calls_before = len(audio.calls)
+
+    controller.handle_double_click("yu")
+
+    assert windows["yu"].spun == 1
+    assert len(audio.calls) == calls_before
+    assert audio.is_playing is True
+
+
+def test_overlap_easter_egg_triggers_pair_with_cooldown(asset_pack_factory) -> None:
+    controller, windows, audio = build_controller(asset_pack_factory)
+    windows["lei"].rect = Rect(0, 0, 100, 100)
+    windows["yu"].rect = Rect(10, 10, 100, 100)
+    controller.set_overlap_easter_egg(True)
+
+    controller.update_proximity()
+    assert len(audio.calls) == 1 and audio.calls[0][0] == "lei"
+
+    controller.stop_all()
+    controller.update_proximity()
+    assert len(audio.calls) == 1  # 冷却期内不重复触发
+
+    controller._last_overlap_at = 0.0
+    controller.update_proximity()
+    assert len(audio.calls) == 2
+
+
+def test_pair_dialogue_nods_both_pets(asset_pack_factory) -> None:
+    controller, windows, audio = build_controller(asset_pack_factory)
+    controller.start_pair(1)
+    assert windows["lei"].nodded == 1
+    assert windows["yu"].nodded == 1

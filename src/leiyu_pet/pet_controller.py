@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+from collections import deque
 from collections.abc import Mapping
 from typing import Protocol, cast
 
@@ -10,9 +12,14 @@ from PySide6.QtCore import QObject, QTimer, Signal
 from .crosstalk import DEFAULT_LINES, CrosstalkDirector, clamp_lines, crosstalk_roles
 from .dialogue import DialogueController
 from .models import AssetPack, PlaybackCommand, Role, VoiceMode
-from .proximity import ProximityTracker, Rect
+from .proximity import ProximityTracker, Rect, overlap_ratio
 from .shuffle import ShuffleBag
 from .subtitles import caption_at
+
+#: 重叠彩蛋的触发阈值与冷却时间。
+OVERLAP_THRESHOLD = 0.55
+OVERLAP_COOLDOWN_SECONDS = 30.0
+HISTORY_LIMIT = 8
 
 
 class PetWindowPort(Protocol):
@@ -55,6 +62,13 @@ class PetController(QObject):
         self._generation = 0
         self._solo_bags: dict[Role, ShuffleBag[int]] = {}
         self._pair_bag = ShuffleBag(pack.pairs)
+        self._history: dict[Role, deque[tuple[int, str]]] = {
+            role: deque(maxlen=HISTORY_LIMIT) for role in ("lei", "yu")
+        }
+        #: 两只叠在一起时自动来一段问答；默认关闭，由设置页/托盘开启。
+        self.overlap_enabled = False
+        self._overlap_busy = False
+        self._last_overlap_at = 0.0
         self._rebuild_solo_bags()
 
         audio.started.connect(self._on_audio_started)
@@ -89,6 +103,7 @@ class PetController(QObject):
         if not self.both_visible():
             self.proximity.near = False
             angles = (0.0, 0.0)
+            self._maybe_overlap_easter_egg(None, None)
         else:
             lei_rect = self.windows["lei"].face_rect_global()
             yu_rect = self.windows["yu"].face_rect_global()
@@ -98,9 +113,72 @@ class PetController(QObject):
                 yu_rect,
                 enabled=self.tilt_enabled,
             )
+            self._maybe_overlap_easter_egg(lei_rect, yu_rect)
         self.windows["lei"].set_tilt(angles[0])
         self.windows["yu"].set_tilt(angles[1])
         return self.proximity.near
+
+    def _maybe_overlap_easter_egg(self, lei: Rect | None, yu: Rect | None) -> None:
+        """两只叠在一起时自动来一段问答，带冷却，避免反复触发。"""
+        if not self.overlap_enabled or lei is None or yu is None:
+            return
+        if self._overlap_busy or self.crosstalk.running or self.dialogue.active:
+            return
+        if overlap_ratio(lei, yu) < OVERLAP_THRESHOLD:
+            return
+        if time.monotonic() - self._last_overlap_at < OVERLAP_COOLDOWN_SECONDS:
+            return
+        self._overlap_busy = True
+        self._last_overlap_at = time.monotonic()
+        try:
+            self.start_pair()
+        finally:
+            self._overlap_busy = False
+
+    def set_overlap_easter_egg(self, enabled: bool) -> None:
+        self.overlap_enabled = bool(enabled)
+        if not self.overlap_enabled:
+            self._last_overlap_at = 0.0
+
+    def _audio_is_playing(self) -> bool:
+        return bool(getattr(self.audio, "is_playing", False))
+
+    def show_notice(self, role: Role, text: str, *, seconds: float = 6.0) -> bool:
+        """只弹字幕气泡、不发声（提醒类功能用）。
+
+        正在播放音频时返回 ``False``：此时字幕由音频进度驱动，硬插进去会被
+        下一帧覆盖。调用方可以退回托盘气泡。
+        """
+        window = self.windows.get(role)
+        if window is None or not window.isVisible() or not text.strip():
+            return False
+        if self._audio_is_playing():
+            return False
+        message = text.strip()
+        window.set_caption(message)
+
+        def clear_if_unchanged() -> None:
+            getter = getattr(window, "caption", None)
+            current = getter() if callable(getter) else getattr(window, "caption", "")
+            if current == message:
+                window.set_caption("")
+
+        QTimer.singleShot(max(1, int(seconds * 1000)), clear_if_unchanged)
+        return True
+
+    def handle_double_click(self, role: Role) -> None:
+        """双击彩蛋：原地转一圈（不打断正在说的话）。"""
+        spin = getattr(self.windows[role], "spin", None)
+        if callable(spin):
+            spin()
+
+    def recent(self, role: Role, limit: int = HISTORY_LIMIT) -> list[tuple[int, str]]:
+        """最近播放过的片段（新的在后），供「最近说过」菜单重播。"""
+        return list(self._history[role])[-max(1, int(limit)):]
+
+    def is_busy(self) -> bool:
+        """当前是否有任何发声/对话在进行。"""
+        return self._audio_is_playing() or self.dialogue.active or self.crosstalk.running
 
     def handle_click(self, role: Role) -> None:
         """点击某只桌宠只播放它自己的独白。
@@ -164,6 +242,10 @@ class PetController(QObject):
                 raise KeyError(f"不存在问答组 {pair_id}") from exc
         self.crosstalk.cancel()
         self._execute(self.dialogue.start(pair))
+        for window in self.windows.values():
+            nod = getattr(window, "nod", None)
+            if callable(nod):
+                nod()
         return True
 
     def _execute(self, command: PlaybackCommand) -> None:
@@ -215,7 +297,9 @@ class PetController(QObject):
         for current_role, window in self.windows.items():
             window.set_speaking(current_role == role)
         clip = self.pack.clip(self.voice_mode, clip_id)
-        self.windows[cast(Role, role)].set_caption(caption_at(clip, 0.0))
+        typed_role = cast(Role, role)
+        self._history[typed_role].append((clip_id, clip.text))
+        self.windows[typed_role].set_caption(caption_at(clip, 0.0))
 
     def _on_audio_position(self, role: str, clip_id: int, seconds: float) -> None:
         clip = self.pack.clip(self.voice_mode, clip_id)
