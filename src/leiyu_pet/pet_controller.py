@@ -34,6 +34,14 @@ OVERLAP_THRESHOLD = 0.55
 OVERLAP_COOLDOWN_SECONDS = 12.0
 #: 打开后把每次互喷判定写入日志（默认静默），用于现场排障。
 OVERLAP_DEBUG_ENV = "LEIYU_DEBUG_OVERLAP"
+#: 试图做被禁的事情时改成求救——让「为什么没反应」有明确出口。
+#: 捂嘴（禁言）模式的两句台词：点击时只回「已被禁言」，
+#: 试图做被禁的事情时改成求救——让「为什么没反应」有明确出口。
+MUTED_LINE = "该用户因违反社区友善规范已被禁言"
+MUTED_RELEASE_HINT = "关闭捂嘴模式，快把我放出来"
+#: 捂嘴期间被拖到一起时，「快把我放出来」的重播冷却（秒）。
+MUTED_HINT_COOLDOWN_SECONDS = 10.0
+OVERLAP_DEBUG_ENV = "LEIYU_DEBUG_OVERLAP"
 HISTORY_LIMIT = 8
 
 Mode = str  # "idle" | "solo" | "pair" | "crosstalk" | "battle"
@@ -51,6 +59,8 @@ class PetWindowPort(Protocol):
     def set_tilt(self, angle: float) -> None: ...
 
     def set_caption(self, text: str) -> None: ...
+
+    def set_muted(self, value: bool) -> None: ...
 
 
 class PetController(QObject):
@@ -96,12 +106,15 @@ class PetController(QObject):
         self._history: dict[Role, deque[tuple[int, str]]] = {
             role: deque(maxlen=HISTORY_LIMIT) for role in ("lei", "yu")
         }
-        #: 两只叠在一起时自动来一段问答；默认关闭，由设置页/托盘开启。
-        self.overlap_enabled = False
+        #: 两只叠在一起时自动来一段问答；默认开启，由设置页关闭。
+        self.overlap_enabled = True
         self.overlap_trigger_gap = OVERLAP_TRIGGER_GAP
+        #: 捂嘴（禁言）：不发声、不对话、不自动动，只有拖拽是例外。
+        self.muted = False
         self._overlap_busy = False
         self._last_overlap_at = 0.0
         self._last_overlap_log_at = 0.0
+        self._last_muted_hint_at = 0.0
         #: 当前播放模式；决战与相声互斥，切换时先完整退出旧模式。
         self.mode: Mode = "idle"
         self._rebuild_solo_bags()
@@ -162,6 +175,13 @@ class PetController(QObject):
         的根因。面积重叠率作为兼容分支保留，覆盖「整只叠上去」的做法。
         """
         if not self.overlap_enabled or lei is None or yu is None:
+            return
+        if self.muted:
+            # 捂嘴期间不互喷。被拖到一起时给一句求救，但要冷却，别刷屏。
+            now = time.monotonic()
+            if now - self._last_muted_hint_at >= MUTED_HINT_COOLDOWN_SECONDS:
+                self._last_muted_hint_at = now
+                self._muted_refuse()
             return
         current_gap = gap(lei, yu)
         ratio = overlap_ratio(lei, yu)
@@ -235,6 +255,45 @@ class PetController(QObject):
         """两只脸部间隙小于该值即视为「靠在一起」，默认 24px。"""
         self.overlap_trigger_gap = min(max(float(pixels), 0.0), 200.0)
 
+    # ------------------------------------------------------------ 捂嘴（禁言）
+    def set_muted(self, value: bool) -> None:
+        """捂嘴总开关：两只一起生效，界面上会多出一只捂住嘴的大手。
+
+        捂嘴期间不发声、不对话、不自动游走、不出 VS 特效；拖拽仍然允许
+        （用户的手比禁言大）。关闭后一切照旧。
+        """
+        muted = bool(value)
+        if muted == self.muted:
+            self._paint_muted()
+            return
+        self.muted = muted
+        if muted:
+            self.stop_all()
+        else:
+            for window in self.windows.values():
+                window.set_caption("")
+        self._paint_muted()
+
+    def _paint_muted(self) -> None:
+        """把捂嘴状态同步到窗口（窗口负责画那只大手）。"""
+        for window in self.windows.values():
+            setter = getattr(window, "set_muted", None)
+            if callable(setter):
+                setter(self.muted)
+
+    def _muted_refuse(self, role: Role | None = None) -> None:
+        """捂嘴期间被要求发声或做动作：只弹一句求救，不真的执行。"""
+        self._show_muted_hint(MUTED_RELEASE_HINT, role)
+
+    def _show_muted_hint(self, text: str, role: Role | None = None) -> None:
+        targets = [role] if role in self.windows else list(self.windows)
+        shown = False
+        for target in targets:
+            if self.show_notice(target, text, seconds=5.0):
+                shown = True
+        if not shown:
+            self.notice.emit(text)
+
     def _audio_is_playing(self) -> bool:
         return bool(getattr(self.audio, "is_playing", False))
 
@@ -263,6 +322,10 @@ class PetController(QObject):
 
     def handle_double_click(self, role: Role) -> None:
         """双击彩蛋：原地转一圈（不打断正在说的话）。"""
+        if self.muted:
+            # 捂嘴期间连转圈也不给：转完没声音更容易让人以为坏了。
+            self._muted_refuse(role)
+            return
         spin = getattr(self.windows[role], "spin", None)
         if callable(spin):
             spin()
@@ -282,12 +345,18 @@ class PetController(QObject):
         改播对话，会出现「点余承东却由雷军先开口」的错位。
         """
         self.update_proximity()
+        if self.muted:
+            self._show_muted_hint(MUTED_LINE, role)
+            return
         jump = getattr(self.windows[role], "jump", None)
         if callable(jump):
             jump()
         self.play_solo(role)
 
     def play_solo(self, role: Role, clip_id: int | None = None) -> None:
+        if self.muted:
+            self._muted_refuse(role)
+            return
         self.dialogue.cancel()
         self.crosstalk.cancel()
         self._enter_mode("solo")
@@ -329,6 +398,9 @@ class PetController(QObject):
 
         需要两只都可见才有来有回；隐藏了一只时返回 False，由调用方提示。
         """
+        if self.muted:
+            self._muted_refuse()
+            return False
         if not self.both_visible():
             return False
         total = clamp_lines(self.crosstalk_lines if lines is None else lines)
@@ -354,6 +426,9 @@ class PetController(QObject):
         音量按「相对用户设置」的倍率处理：用户把总音量调到 30%，整段都会跟着
         变轻但仍有渐强；静音状态下依然保持静音。
         """
+        if self.muted:
+            self._muted_refuse()
+            return False
         if not self.both_visible():
             return False
         total = clamp_lines(self.crosstalk_lines if lines is None else lines)
@@ -399,6 +474,9 @@ class PetController(QObject):
         才拒绝，并明确告知原因。
         """
         self.update_proximity()
+        if self.muted:
+            self._muted_refuse()
+            return False
         if not self.both_visible():
             self.notice.emit("需要两只桌宠都在场才能对话，已为你显示全部")
             return False

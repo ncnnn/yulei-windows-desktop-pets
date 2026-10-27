@@ -195,14 +195,18 @@ class FakeRuntime:
         self.controller.tilt_enabled = tilt
         self.assistant = None
         self.calls = []
+        self._muted = False
 
     @property
     def muted(self):
-        return self.volume <= 0.001
+        return self._muted
 
     def toggle_mute(self):
-        self.volume = 0.0 if self.volume > 0.001 else 0.65
-        self.calls.append(("toggle_mute", self.volume))
+        self.set_muted(not self._muted)
+
+    def set_muted(self, enabled):
+        self._muted = bool(enabled)
+        self.calls.append(("set_muted", self._muted))
 
     def set_wander_enabled(self, enabled, interval_seconds=None):
         self.calls.append(("set_wander_enabled", enabled, interval_seconds))
@@ -306,10 +310,15 @@ def test_playback_actions_call_controller(app):
     _action(tray._menu, f"{ROLE_NAMES['lei']}随机说一段").trigger()
     _action(tray._menu, f"{ROLE_NAMES['yu']}随机说一段").trigger()
     _start_action(tray, "相声模式").trigger()
-    _action(tray._menu, "停止播放").trigger()
 
     calls = [c[0] for c in runtime.controller.calls]
-    assert calls == ["play_solo", "play_solo", "start_crosstalk", "stop_all"]
+    assert calls == ["play_solo", "play_solo", "start_crosstalk"]
+
+    # 捂嘴（禁言）走运行时总开关，两只一起生效。
+    mute = _action(tray._menu, "捂嘴（禁言）")
+    assert mute.isChecked() is False
+    mute.trigger()
+    assert runtime.muted is True
 
 
 def test_role_visibility_toggle(app):

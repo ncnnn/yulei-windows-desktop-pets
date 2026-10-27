@@ -313,6 +313,20 @@ class SettingsDialog(QDialog):
         self.rate_combo.currentIndexChanged.connect(self._on_rate)
         form.addRow("播放速度", self.rate_combo)
 
+        self.muted_check = QCheckBox("捂嘴（禁言）：两只都不发声、不对话")
+        self.muted_check.setObjectName("muted")
+        self.muted_check.setChecked(bool(getattr(self.runtime, "muted", False)))
+        self.muted_check.toggled.connect(self._on_muted)
+        form.addRow(self.muted_check)
+
+        muted_hint = QLabel(
+            "捂嘴期间桌宠头上会出现一只大手：点击只会回一句「已被禁言」，"
+            "也不会自动游走、不会出 VS 特效；拖动仍然可以。"
+        )
+        muted_hint.setObjectName("section_hint")
+        muted_hint.setWordWrap(True)
+        form.addRow(muted_hint)
+
         self.explicit_check = QCheckBox("允许第 17 段（含粗口）")
         self.explicit_check.setObjectName("explicit")
         self.explicit_check.setChecked(self.runtime.controller.include_explicit)
@@ -781,6 +795,13 @@ class SettingsDialog(QDialog):
     def _set_voice(self, mode: str) -> None:
         self.runtime.controller.set_voice_mode(mode)
         self.config.helium = mode == "helium"
+        self._persist()
+
+    def _on_muted(self, checked: bool) -> None:
+        setter = getattr(self.runtime, "set_muted", None)
+        if callable(setter):
+            setter(bool(checked))
+        self.config.muted = bool(checked)
         self._persist()
 
     def _on_explicit(self, checked: bool) -> None:

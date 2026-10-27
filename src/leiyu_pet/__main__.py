@@ -103,6 +103,7 @@ def apply_config(runtime, settings) -> None:
     controller.set_crosstalk_lines(settings.crosstalk_lines)
     controller.set_overlap_easter_egg(settings.overlap_easter_egg)
     controller.set_overlap_trigger_gap(settings.overlap_trigger_gap)
+    runtime.set_muted(bool(getattr(settings, "muted", False)))
 
     runtime.set_pet_size("lei", settings.lei_size)
     runtime.set_pet_size("yu", settings.yu_size)

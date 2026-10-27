@@ -56,6 +56,8 @@ class PetRuntime(QObject):
         self.volume = 0.65
         self.audio.set_volume(self.volume)
         self._volume_before_mute = self.volume
+        #: 捂嘴（禁言）模式：两只都不发声、不主动对话、不游走、不出 VS 特效。
+        self._muted = False
         self.controller = PetController(pack, self.windows, self.audio, parent=self)
         self.menu_manager = ContextMenuManager(self)
         #: 整点/久坐/番茄钟的统一入口。
@@ -121,18 +123,47 @@ class PetRuntime(QObject):
         self.controller.set_volume(self.volume)
 
     def toggle_mute(self) -> bool:
-        """静音/恢复。返回切换后是否处于静音。"""
-        if self.volume > 0.001:
-            self._volume_before_mute = self.volume
+        """捂嘴开关：返回切换后是否处于捂嘴（禁言）状态。"""
+        self.set_muted(not self._muted)
+        return self._muted
+
+    def set_muted(self, value: bool) -> None:
+        """打开/关闭捂嘴模式。
+
+        捂嘴期间两只失去说话与发声能力：点击只回一句「已被禁言」，不播放、
+        不自动游走、不出 VS 特效；拖拽仍然允许（用户的手比禁言大）。
+        """
+        muted = bool(value)
+        if muted == self._muted:
+            return
+        self._muted = muted
+        if muted:
+            # 连音量一起降到 0：捂嘴期间不该有任何声音漏出来。
+            if self.volume > 0.001:
+                self._volume_before_mute = self.volume
             self.set_volume(0.0)
         else:
             self.set_volume(self._volume_before_mute or 0.65)
-        self._persist_setting("volume", self.volume)
-        return self.volume <= 0.001
+        setter = getattr(self.controller, "set_muted", None)
+        if callable(setter):
+            setter(muted)
+        # 还原音量会覆盖掉上面写回配置的 muted 标记，这里放在最后持久化。
+        self._persist_setting("muted", muted)
+        if muted:
+            self._stick_action_timer.stop()
+            self._wander_timer.stop()
+            self._wander_targets.clear()
+            self._wander_step_timer.stop()
+            if self._duel is not None:
+                self._duel.stop()
+        else:
+            self._schedule_stick_actions()
+            if getattr(self.config, "wander_enabled", False):
+                self._wander_timer.start(self._wander_interval_seconds * 1000)
 
     @property
     def muted(self) -> bool:
-        return self.volume <= 0.001
+        return self._muted
 
     def set_opacity(self, value: float) -> None:
         opacity = min(max(float(value), 0.3), 1.0)
@@ -197,6 +228,9 @@ class PetRuntime(QObject):
 
     def _plan_wander(self) -> None:
         """给每只可见、未被拖动的桌宠挑一个新落点。"""
+        if self._muted:
+            # 捂嘴期间不许自己走动；被用户拖走仍然算例外。
+            return
         if self._wander_targets or self.controller.is_busy():
             return
         area = self._play_area()
@@ -285,6 +319,9 @@ class PetRuntime(QObject):
 
     def _play_duel_effect(self, reason: str) -> bool:
         """每场对话开场出一次；同一时刻只允许一个，后来的丢弃并记日志。"""
+        if self._muted:
+            # 捂嘴期间不出 VS 特效。
+            return False
         if not self._duel_enabled:
             return False
         if time.monotonic() - self._last_notice_at < DUEL_NOTICE_QUIET_SECONDS:
@@ -357,6 +394,10 @@ class PetRuntime(QObject):
         any_body = any(
             getattr(window, "stick_enabled", False) for window in self.windows.values()
         )
+        if self._muted:
+            # 捂嘴期间连招手跳舞都停了：动了不出声更像坏掉了。
+            self._stick_action_timer.stop()
+            return
         if self._stick_actions_enabled and self._stick_action_interval > 0 and any_body:
             self._stick_action_timer.start(self._stick_action_interval * 1000)
         else:
@@ -364,7 +405,7 @@ class PetRuntime(QObject):
 
     def _maybe_stick_action(self) -> None:
         """随机动作：只在空闲、可见、未被拖动时挑一只做个动作。"""
-        if self.controller.is_busy():
+        if self._muted or self.controller.is_busy():
             return
         candidates = [
             window

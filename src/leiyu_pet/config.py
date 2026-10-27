@@ -28,7 +28,7 @@ DEFAULTS: dict[str, object] = {
     "lei_visible": True,
     "yu_visible": True,
     # 相声模式默认句数与是否记住窗口位置
-    "crosstalk_lines": 6,
+    "crosstalk_lines": 20,
     "remember_position": True,
     "lei_pos": [],
     "yu_pos": [],
@@ -55,7 +55,7 @@ DEFAULTS: dict[str, object] = {
     # 自动游走与重叠彩蛋
     "wander_enabled": False,
     "wander_interval_seconds": 45,
-    "overlap_easter_egg": False,
+    "overlap_easter_egg": True,
     # 两只脸部间隙小于该像素值即视为「靠在一起」，触发自动互喷。
     "overlap_trigger_gap": 24.0,
     # 火柴人躯体
@@ -74,6 +74,7 @@ DEFAULTS: dict[str, object] = {
     "auto_move_dialog_mode": "crosstalk",
     # 对话开场的决斗特效（纯视觉，与决战模式无关）
     "duel_effect_enabled": True,
+    "muted": False,
     # 分类磨砂：只作用于右键/托盘菜单与设置窗口（主窗口永远绝对透明）
     "frosted_ui_enabled": True,
 }
@@ -92,7 +93,7 @@ class Config:
     lock_position: bool = False
     lei_visible: bool = True
     yu_visible: bool = True
-    crosstalk_lines: int = 6
+    crosstalk_lines: int = 20
     remember_position: bool = True
     lei_pos: list[int] = field(default_factory=list)
     yu_pos: list[int] = field(default_factory=list)
@@ -114,8 +115,9 @@ class Config:
     pomodoro_break_minutes: int = 5
     wander_enabled: bool = False
     wander_interval_seconds: int = 45
-    overlap_easter_egg: bool = False
+    overlap_easter_egg: bool = True
     overlap_trigger_gap: float = 24.0
+    muted: bool = False
     stick_body_enabled: bool = True
     stick_random_action_enabled: bool = True
     stick_body_ratio: float = 0.85

@@ -204,10 +204,15 @@ class FakeRuntime:
         self.controller = FakeController()
         self.calls = []
         self.frosted = None
+        self.muted = False
 
     def set_volume(self, value):
         self.volume = min(max(float(value), 0.0), 1.0)
         self.calls.append(("set_volume", self.volume))
+
+    def set_muted(self, enabled):
+        self.muted = bool(enabled)
+        self.calls.append(("set_muted", self.muted))
 
     def set_rate(self, rate):
         self.calls.append(("set_rate", rate))

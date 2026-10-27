@@ -15,6 +15,7 @@ from PySide6.QtGui import (
     QMouseEvent,
     QPainter,
     QPaintEvent,
+    QPen,
     QPixmap,
     QTransform,
 )
@@ -110,6 +111,8 @@ class PetWindow(QWidget):
         self._renderer = StickRenderer()
         #: 侧面用的程序化剪影（由 alpha 通道生成，换头像时重建一次）。
         self._side_pixmap: QPixmap | None = None
+        #: 捂嘴（禁言）状态：画一只从画面外伸进来捂住嘴的大手。
+        self._muted = False
 
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
@@ -630,7 +633,70 @@ class PetWindow(QWidget):
                 unit=unit,
             )
 
+        if self._muted:
+            painter.save()
+            painter.setTransform(self._character_transform(), True)
+            self._draw_muting_hand(painter, box)
+            painter.restore()
+
+    def _draw_muting_hand(self, painter: QPainter, box: QRectF) -> None:
+        """捂嘴的大手：四指搭在脸颊上，手掌压住嘴，拇指扣在下巴旁。
+
+        纯矢量绘制，跟着头部一起歪——看起来就像真有一只手从画面外伸进来。
+        """
+        width = box.width()
+        height = box.height()
+        if width <= 0 or height <= 0:
+            return
+        center_x = box.left() + width / 2.0
+        palm_width = width * 0.72
+        palm_height = height * 0.30
+        palm_top = box.top() + height * 0.66
+        palm = QRectF(center_x - palm_width / 2.0, palm_top, palm_width, palm_height)
+
+        finger_width = palm_width * 0.235
+        finger_height = height * 0.13
+        finger_top = palm_top - finger_height * 0.45
+        outline = max(1.2, width * 0.016)
+        radius = min(finger_width, finger_height) / 2.0
+
+        painter.setPen(QPen(QColor("#4a3125"), outline))
+        painter.setBrush(QBrush(QColor("#f0bf92")))
+        for index in (-1.5, -0.5, 0.5, 1.5):
+            left = center_x + index * finger_width - finger_width / 2.0
+            finger = QRectF(
+                left,
+                finger_top + abs(index) * finger_height * 0.06,
+                finger_width,
+                finger_height,
+            )
+            painter.drawRoundedRect(finger, radius, radius)
+
+        thumb_width = palm_width * 0.28
+        thumb = QRectF(
+            palm.left() - thumb_width * 0.62,
+            palm_top + palm_height * 0.34,
+            thumb_width,
+            palm_height * 0.62,
+        )
+        thumb_radius = min(thumb.width(), thumb.height()) / 2.0
+        painter.drawRoundedRect(thumb, thumb_radius, thumb_radius)
+        # 手掌最后画，压住指根，看起来才是「手捂上来」而不是「手指浮在脸上」。
+        painter.setBrush(QBrush(QColor("#f8cfa1")))
+        painter.drawRoundedRect(palm, palm_height * 0.42, palm_height * 0.42)
+
     # ---------------------------------------------------------------- 字幕
+
+    def set_muted(self, value: bool) -> None:
+        """捂嘴（禁言）开关：画/撤掉那只捂住嘴的大手。"""
+        muted = bool(value)
+        if muted == self._muted:
+            return
+        self._muted = muted
+        self.update()
+
+    def muted(self) -> bool:
+        return self._muted
 
     def set_caption(self, text: str | None) -> None:
         self._caption.set_caption(text)

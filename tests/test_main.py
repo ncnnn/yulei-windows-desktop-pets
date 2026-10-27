@@ -92,6 +92,7 @@ class FakeRuntime:
         self.auto_dialog: tuple[int, str] | None = None
         self.duel_effect: bool | None = None
         self.frosted: bool | None = None
+        self.muted: bool | None = None
         self.windows = {"lei": FakeWindow(), "yu": FakeWindow()}
         self.controller = FakeController()
         self.assistant = FakeAssistant()
@@ -122,6 +123,9 @@ class FakeRuntime:
 
     def set_frosted_ui(self, enabled: bool) -> None:
         self.frosted = bool(enabled)
+
+    def set_muted(self, enabled: bool) -> None:
+        self.muted = bool(enabled)
 
     def set_opacity(self, value: float) -> None:
         self.opacity = value

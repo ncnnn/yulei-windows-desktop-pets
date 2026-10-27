@@ -8,7 +8,11 @@ from PySide6.QtCore import QObject, Signal
 
 from leiyu_pet.manifest import load_asset_pack
 from leiyu_pet.models import Role
-from leiyu_pet.pet_controller import PetController
+from leiyu_pet.pet_controller import (
+    MUTED_LINE,
+    MUTED_RELEASE_HINT,
+    PetController,
+)
 from leiyu_pet.proximity import Rect
 
 
@@ -23,6 +27,7 @@ class FakeWindow:
         self.status = ""
         self.spun = 0
         self.nodded = 0
+        self.muted = False
 
     def isVisible(self) -> bool:
         return self.visible
@@ -38,6 +43,9 @@ class FakeWindow:
 
     def set_caption(self, text: str) -> None:
         self.caption = text
+
+    def set_muted(self, value: bool) -> None:
+        self.muted = bool(value)
 
     def set_status_text(self, text: str) -> None:
         self.status = text
@@ -74,7 +82,7 @@ class FakeAudio(QObject):
         pass
 
 
-def build_controller(asset_pack_factory: Callable[..., Path]):
+def build_controller(asset_pack_factory: Callable[..., Path], *, overlap: bool = False):
     pack = load_asset_pack(asset_pack_factory())
     windows = {
         "lei": FakeWindow("lei", Rect(0, 0, 100, 100)),
@@ -82,6 +90,9 @@ def build_controller(asset_pack_factory: Callable[..., Path]):
     }
     audio = FakeAudio()
     controller = PetController(pack, windows, audio, start_timer=False)
+    # 「叠在一起自动互喷」默认开启；这两只默认就挨着，会自己开聊，
+    # 干扰其它用例的播放序列，所以夹具里默认关掉、需要时再打开。
+    controller.set_overlap_easter_egg(overlap)
     return controller, windows, audio
 
 
@@ -472,3 +483,78 @@ def test_status_badge_is_separate_from_the_dialogue_bubble(asset_pack_factory) -
     assert controller.clear_status() is True
     assert windows["lei"].status == ""
     assert windows["lei"].caption  # 清状态条不影响台词
+
+
+def test_overlap_easter_egg_is_on_by_default(asset_pack_factory) -> None:
+    """叠在一起自动互喷默认开启，不用每次去设置里打开。"""
+    pack = load_asset_pack(asset_pack_factory())
+    windows = {
+        "lei": FakeWindow("lei", Rect(0, 0, 100, 100)),
+        "yu": FakeWindow("yu", Rect(400, 0, 100, 100)),
+    }
+    controller = PetController(pack, windows, FakeAudio(), start_timer=False)
+
+    assert controller.overlap_enabled is True
+
+
+def test_muted_click_only_shows_the_banned_line(asset_pack_factory) -> None:
+    """捂嘴期间点击不发声、不弹跳，只回一句「已被禁言」。"""
+    controller, windows, audio = build_controller(asset_pack_factory)
+
+    controller.set_muted(True)
+    controller.handle_click("lei")
+
+    assert audio.calls == []
+    assert windows["lei"].caption == MUTED_LINE
+    assert windows["lei"].muted is True
+
+
+def test_muted_blocks_every_dialogue_and_asks_for_release(asset_pack_factory) -> None:
+    """捂嘴期间相声/决战/对话都被挡下，并弹出「快把我放出来」。"""
+    controller, windows, audio = build_controller(asset_pack_factory)
+
+    controller.set_muted(True)
+    assert controller.start_crosstalk(4) is False
+    assert controller.start_battle(4) is False
+    assert controller.start_pair() is False
+    assert controller.play_solo("lei") is None
+    assert audio.calls == []
+    assert windows["lei"].caption == MUTED_RELEASE_HINT
+    assert windows["yu"].caption == MUTED_RELEASE_HINT
+
+
+def test_muted_blocks_animations_too(asset_pack_factory) -> None:
+    """捂嘴期间连转圈都不给：动了不出声更容易被当成坏了。"""
+    controller, windows, audio = build_controller(asset_pack_factory)
+
+    controller.set_muted(True)
+    controller.handle_double_click("lei")
+
+    assert windows["lei"].spun == 0
+    assert windows["lei"].caption == MUTED_RELEASE_HINT
+
+
+def test_muted_paints_and_clears_the_hand(asset_pack_factory) -> None:
+    """捂嘴状态要同步到窗口（窗口负责画那只大手），恢复后撤掉。"""
+    controller, windows, _audio = build_controller(asset_pack_factory)
+
+    controller.set_muted(True)
+    assert windows["lei"].muted is True
+    assert windows["yu"].muted is True
+
+    controller.set_muted(False)
+    assert windows["lei"].muted is False
+    assert windows["lei"].caption == ""
+
+
+def test_muted_suppresses_the_overlap_easter_egg(asset_pack_factory) -> None:
+    """捂嘴期间被拖到一起也不会互喷，只提示一次求救。"""
+    controller, windows, audio = build_controller(asset_pack_factory)
+    controller.set_overlap_easter_egg(True)
+    windows["yu"].rect = Rect(20, 0, 100, 100)
+
+    controller.set_muted(True)
+    controller.update_proximity()
+
+    assert audio.calls == []
+    assert windows["lei"].caption == MUTED_RELEASE_HINT

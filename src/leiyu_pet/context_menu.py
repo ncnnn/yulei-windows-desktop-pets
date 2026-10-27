@@ -70,12 +70,14 @@ class ContextMenuManager(QObject):
         menu.addSeparator()
         self._add_voice_menu(menu)
         self._add_volume_menu(menu)
-        self._add_action(
+        mute_action = self._add_action(
             menu,
-            "恢复声音" if getattr(self.runtime, "muted", False) else "静音",
-            self.runtime.toggle_mute,
+            "捂嘴（禁言）",
+            self.runtime.set_muted,
+            checkable=True,
+            pass_checked=True,
         )
-        self._add_action(menu, "停止播放", controller.stop_all)
+        mute_action.setChecked(bool(getattr(self.runtime, "muted", False)))
 
         menu.addSeparator()
         open_settings = getattr(self.runtime, "on_open_settings", None)

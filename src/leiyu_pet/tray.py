@@ -182,7 +182,6 @@ class TrayManager(QObject):
         lines = int(rt.controller.crosstalk_lines)
         self._add_action(self._menu, f"相声模式 · {lines} 句", self._start_crosstalk)
         self._add_action(self._menu, f"决战模式 · {lines} 句", self._start_battle)
-        self._add_action(self._menu, "停止播放", rt.controller.stop_all)
         self._menu.addSeparator()
 
         voice_menu = frosted_ui.submenu(self._menu, "声音模式")
@@ -206,8 +205,12 @@ class TrayManager(QObject):
         )
         self._add_action(
             self._menu,
-            "恢复声音" if getattr(rt, "muted", False) else "静音",
-            rt.toggle_mute,
+            "捂嘴（禁言）",
+            rt.set_muted,
+            checkable=True,
+            pass_checked=True,
+            checked=bool(getattr(rt, "muted", False)),
+            checked_of=lambda: bool(getattr(rt, "muted", False)),
         )
 
         focus_menu = frosted_ui.submenu(self._menu, "番茄钟")
