@@ -110,7 +110,7 @@ def apply_config(runtime, settings) -> None:
     runtime.set_opacity(settings.opacity)
     runtime.set_caption_font_size(settings.caption_font_size)
     runtime.set_always_on_top(settings.always_on_top)
-    runtime.set_glass(settings.glass_enabled, settings.corner_radius)
+    runtime.set_frosted_ui(settings.frosted_ui_enabled)
     runtime.set_wander_enabled(
         settings.wander_enabled,
         settings.wander_interval_seconds,

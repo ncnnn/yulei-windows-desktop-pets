@@ -74,9 +74,8 @@ DEFAULTS: dict[str, object] = {
     "auto_move_dialog_mode": "crosstalk",
     # 对话开场的决斗特效（纯视觉，与决战模式无关）
     "duel_effect_enabled": True,
-    # 半透明磨砂面板与圆角半径
-    "glass_enabled": True,
-    "corner_radius": 14,
+    # 分类磨砂：只作用于右键/托盘菜单与设置窗口（主窗口永远绝对透明）
+    "frosted_ui_enabled": True,
 }
 
 
@@ -129,8 +128,7 @@ class Config:
     auto_move_dialog_chance: int = 0
     auto_move_dialog_mode: str = "crosstalk"
     duel_effect_enabled: bool = True
-    glass_enabled: bool = True
-    corner_radius: int = 14
+    frosted_ui_enabled: bool = True
 
 
 def _defaults() -> dict[str, object]:
@@ -177,8 +175,6 @@ def _coerce(key: str, value: object) -> object:
             return min(max(number, 10), 600)
         if key == "auto_move_dialog_chance":
             return min(max(number, 0), 100)
-        if key == "corner_radius":
-            return min(max(number, 0), 28)
         if key == "stick_action_interval":
             # 0 表示不随机动；其余至少 8 秒，避免一直手舞足蹈。
             return 0 if number <= 0 else min(max(number, 8), 600)

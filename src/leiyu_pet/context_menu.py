@@ -9,7 +9,9 @@ from PySide6.QtCore import QObject, QPoint
 from PySide6.QtGui import QAction, QActionGroup
 from PySide6.QtWidgets import QApplication, QMenu
 
+from . import frosted_ui
 from .models import Role
+from .stick_body import ACTION_LABELS, RANDOM_ACTIONS
 
 if TYPE_CHECKING:
     from .runtime import PetRuntime
@@ -132,14 +134,22 @@ class ContextMenuManager(QObject):
             bool(getattr(config, "stick_random_action_enabled", True))
         )
 
-        glass_action = self._add_action(
+        frosted_action = self._add_action(
             menu,
-            "半透明磨砂面板",
-            self._toggle_glass,
+            "磨砂菜单与设置",
+            self._toggle_frosted,
             checkable=True,
             pass_checked=True,
         )
-        glass_action.setChecked(bool(getattr(config, "glass_enabled", True)))
+        frosted_action.setChecked(bool(getattr(config, "frosted_ui_enabled", True)))
+
+        action_menu = menu.addMenu("让 TA 做个动作")
+        for state in RANDOM_ACTIONS:
+            self._add_action(
+                action_menu,
+                ACTION_LABELS[state],
+                partial(self._play_action, role, state),
+            )
 
         menu.addSeparator()
         other: Role = "yu" if role == "lei" else "lei"
@@ -156,8 +166,18 @@ class ContextMenuManager(QObject):
         if open_settings is not None:
             self._add_action(menu, "设置…", open_settings)
         self._add_action(menu, "退出全部", QApplication.instance().quit)
+        self._apply_frosted(menu)
         menu.popup(position)
         return menu
+
+    def _apply_frosted(self, menu: QMenu) -> None:
+        """给菜单和它的子菜单统一上材质（子菜单是独立窗口，要逐个处理）。"""
+        plan = getattr(self.runtime, "frosted_plan", None)
+        if plan is None:
+            plan = frosted_ui.current_plan(True)
+        for submenu in menu.findChildren(QMenu):
+            frosted_ui.apply_menu(submenu, plan)
+        frosted_ui.apply_menu(menu, plan)
 
     def _start_crosstalk(self) -> None:
         """隐藏了一只就先把两只都带出来，再开始交替说。"""
@@ -181,15 +201,16 @@ class ContextMenuManager(QObject):
             int(getattr(config, "stick_action_interval", 12)),
         )
 
-    def _toggle_glass(self, checked: bool) -> None:
-        """面板开关：磨砂会按桌面能力降级，圆角跟随配置。"""
+    def _toggle_frosted(self, checked: bool) -> None:
+        """磨砂只作用于菜单与设置；桌宠窗口仍保持绝对透明。"""
         config = getattr(self.runtime, "config", None)
         if config is not None:
-            config.glass_enabled = bool(checked)
-        self.runtime.set_glass(
-            bool(checked),
-            int(getattr(config, "corner_radius", 14)),
-        )
+            config.frosted_ui_enabled = bool(checked)
+        self.runtime.set_frosted_ui(bool(checked))
+
+    def _play_action(self, role: Role, state: str) -> None:
+        window = self.runtime.windows[role]
+        window.play_stick_action(state, seconds=3.2)
 
     def _start_pomodoro(self) -> None:
         assistant = getattr(self.runtime, "assistant", None)

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import ctypes
 import math
 import os
+from ctypes import wintypes
 from pathlib import Path
 
 import pytest
@@ -23,6 +25,7 @@ from leiyu_pet.animation import (
 )
 from leiyu_pet.caption_widget import PADDING, CaptionWidget
 from leiyu_pet.pet_window import BOTTOM_EXTRA, PAD_X, STATUS_HEIGHT, TOP, PetWindow
+from leiyu_pet.platform_win import HTTRANSPARENT
 
 # 必须在 QApplication 创建之前生效：无显示环境下使用 offscreen 插件，避免弹出可见窗口。
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -541,16 +544,16 @@ def test_body_toggle_keeps_the_feet_in_place(qtbot) -> None:
 def test_torso_is_clickable_but_its_sides_are_not(pet: PetWindow) -> None:
     assert pet.stick_enabled is True
     center_x = pet.width() // 2
-    y = int(pet._neck_y() + pet._body_height() * 0.8)
+    y = int(pet._neck_y() + pet._body_height() * 0.35)
 
     assert pet.hit_test(QPoint(center_x, y)) is True
     assert pet.hit_test(QPoint(center_x + 60, y)) is False
 
 
 def test_torso_is_not_clickable_after_disabling_body(pet: PetWindow) -> None:
+    y = int(pet._neck_y() + pet._body_height() * 0.35)
     pet.set_stick_body_enabled(False)
     center_x = pet.width() // 2
-    y = int(pet._neck_y() + pet._body_height() * 0.8)
 
     assert pet.hit_test(QPoint(center_x, y)) is False
 
@@ -613,97 +616,95 @@ def test_status_badge_is_a_separate_widget(pet: PetWindow) -> None:
     assert pet.caption() == "台词"  # 清状态条不影响台词
 
 
-# ------------------------------------------------------------- 半透明面板
+# ----------------------------------------------------- 绝对透明与像素级穿透
 
 
-def test_glass_panel_is_off_until_runtime_applies_it(pet: PetWindow) -> None:
-    assert pet.glass_enabled is False
-    assert pet.glass_plan.panel is False
-    assert pet.panel_rect().isEmpty()
+class _Msg(ctypes.Structure):
+    """Win32 MSG 的最小镜像，用来给 nativeEvent 喂 WM_NCHITTEST。"""
+
+    _fields_ = [
+        ("hwnd", wintypes.HWND),
+        ("message", wintypes.UINT),
+        ("wParam", ctypes.c_size_t),
+        ("lParam", ctypes.c_ssize_t),
+        ("time", wintypes.DWORD),
+        ("pt_x", wintypes.LONG),
+        ("pt_y", wintypes.LONG),
+        ("lPrivate", wintypes.DWORD),
+    ]
 
 
-def test_set_glass_enables_frosted_rounded_panel(pet: PetWindow) -> None:
-    pet.set_glass(True, 14)
-    assert pet.glass_enabled is True
-    assert pet.glass_frosted is True
-    assert pet.glass_radius == 14
-    assert pet.glass_plan.reason == "ok"
+def nchittest(window: PetWindow, local: QPoint) -> tuple[bool, int]:
+    """按屏幕坐标构造 WM_NCHITTEST 并交给窗口，返回 (handled, result)。"""
+    global_point = window.mapToGlobal(local)
+    msg = _Msg()
+    msg.message = 0x0084  # WM_NCHITTEST
+    msg.lParam = ((global_point.y() & 0xFFFF) << 16) | (global_point.x() & 0xFFFF)
+    return window.nativeEvent(b"windows_generic_MSG", ctypes.addressof(msg))
 
 
-def test_set_glass_keeps_radius_when_frost_degrades(pet: PetWindow) -> None:
-    """降级顺序：磨砂先丢，圆角保留。"""
-    pet.set_glass(True, 20, compositing=False)
-    assert pet.glass_enabled is True
-    assert pet.glass_frosted is False
-    assert pet.glass_radius == 20
-
-    pet.set_glass(True, 20, remote=True)
-    assert pet.glass_frosted is False
-    assert pet.glass_radius == 20
-
-
-def test_set_glass_clamps_radius(pet: PetWindow) -> None:
-    pet.set_glass(True, 999)
-    assert pet.glass_radius == 28
-    pet.set_glass(True, -5)
-    assert pet.glass_radius == 0
-
-
-def test_panel_rect_stays_inside_window_and_covers_feet(pet: PetWindow) -> None:
-    pet.set_glass(True, 14)
-    rect = pet.panel_rect()
-    assert rect.left() >= 0
-    assert rect.top() >= 0
-    assert rect.right() <= pet.width()
-    assert rect.bottom() <= pet.height()
-    # 面板要包住头顶、下巴与脚底
-    assert rect.top() < TOP
-    assert rect.bottom() >= int(pet._content_bottom())
-    assert rect.contains(center_point(pet))
-
-
-def test_panel_grows_with_the_stick_body(pet: PetWindow) -> None:
-    pet.set_glass(True, 14)
-    with_body = pet.panel_rect()
-    pet.set_stick_body_enabled(False)
-    without_body = pet.panel_rect()
-    assert with_body.height() > without_body.height()
-
-
-def test_panel_hit_area_is_the_rectangle_not_the_rounded_shape(pet: PetWindow) -> None:
-    """拖拽热区按矩形算：圆角外侧的角点依然可点，不留「看得见点不动」的缝。"""
-    pet.set_glass(True, 24)
-    rect = pet.panel_rect()
-    corner = QPoint(rect.left() + 1, rect.top() + 1)
-    assert pet.hit_test(corner) is True
-    outside = QPoint(rect.left() - 3, rect.top())
-    assert pet.hit_test(outside) is False
-
-
-def test_glass_hits_respect_click_through(pet: PetWindow) -> None:
-    pet.set_glass(True, 14)
-    pet.set_click_through(True)
-    assert pet.hit_test(center_point(pet)) is False
-
-
-def test_glass_does_not_touch_window_flags(pet: PetWindow) -> None:
-    """点击功能与置顶优先：加面板不改窗口标志，也不抢焦点。"""
-    before = pet.windowFlags()
-    pet.set_glass(True, 14)
-    assert pet.windowFlags() == before
-    assert has_flag(pet.windowFlags(), Qt.WindowType.WindowStaysOnTopHint)
+def test_window_flags_disable_system_shadow(pet: PetWindow) -> None:
+    """无边框透明窗口不能再被系统投影糊上一圈灰边。"""
+    assert has_flag(pet.windowFlags(), Qt.WindowType.NoDropShadowWindowHint)
     assert pet.windowType() == Qt.WindowType.Tool
 
 
-def test_panel_paints_translucent_surface_with_empty_corners(pet: PetWindow) -> None:
-    pet.set_glass(True, 24)
+def test_window_paints_nothing_outside_character(pet: PetWindow) -> None:
     image = QImage(pet.size(), QImage.Format.Format_ARGB32)
     image.fill(QColor(0, 0, 0, 0))
     pet.render(image)
-    rect = pet.panel_rect()
-    edge = image.pixelColor(rect.left() + 1, rect.center().y())
-    assert edge.alpha() > 0
-    # 面板有颜色但不遮住人物：透明度介于全透明与不透明之间
-    assert edge.alpha() < 255
-    corner = image.pixelColor(rect.left(), rect.top())
-    assert corner.alpha() < 60
+    # 窗口四角与大块空白都必须是全透明（没有任何底板）
+    for x, y in ((0, 0), (pet.width() - 1, 0), (0, pet.height() - 1), (5, 5)):
+        assert image.pixelColor(x, y).alpha() == 0
+    # 人物本体仍然画出来了
+    center = center_point(pet)
+    assert image.pixelColor(center.x(), center.y()).alpha() > 0
+
+
+def test_nchittest_passes_through_empty_pixels(pet: PetWindow) -> None:
+    handled, result = nchittest(pet, QPoint(4, 4))
+    assert handled is True
+    assert result == HTTRANSPARENT
+
+
+def test_nchittest_keeps_events_on_the_head(pet: PetWindow) -> None:
+    handled, result = nchittest(pet, center_point(pet))
+    assert handled is False
+    assert result == 0
+
+
+def test_nchittest_keeps_events_on_stick_limbs(pet: PetWindow) -> None:
+    """手臂线条上也要能点（旧实现只认躯干中心的一条窄带）。"""
+    center_x, neck_y = pet._neck_point()
+    pose = pet._stick.pose()
+    arm = pose.arms[0]
+    unit = pet._body_height()
+    mid = QPoint(
+        int(center_x + (arm.joint[0] + arm.end[0]) / 2 * unit),
+        int(neck_y + (arm.joint[1] + arm.end[1]) / 2 * unit),
+    )
+    assert pet.hit_test(mid) is True
+    handled, result = nchittest(pet, mid)
+    assert handled is False
+
+
+def test_nchittest_ignores_other_messages(pet: PetWindow) -> None:
+    msg = _Msg()
+    msg.message = 0x0001  # WM_CREATE
+    handled, _result = pet.nativeEvent(b"windows_generic_MSG", ctypes.addressof(msg))
+    assert handled is False
+
+
+def test_hit_test_between_limbs_is_transparent(pet: PetWindow) -> None:
+    """两条腿中间的空隙是透明的，点击应该落到底层。"""
+    center_x, neck_y = pet._neck_point()
+    gap = QPoint(int(center_x), int(neck_y + pet._body_height() * 0.9))
+    assert pet.hit_test(gap) is False
+
+
+def test_click_through_switch_still_wins(pet: PetWindow) -> None:
+    pet.set_click_through(True)
+    assert pet.hit_test(center_point(pet)) is False
+    handled, result = nchittest(pet, center_point(pet))
+    assert handled is True
+    assert result == HTTRANSPARENT

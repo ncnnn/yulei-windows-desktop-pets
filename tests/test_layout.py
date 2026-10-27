@@ -5,12 +5,10 @@ from __future__ import annotations
 from leiyu_pet.layout import (
     BOTTOM_EXTRA,
     PAD_X,
-    PANEL_PAD,
     TOP,
     head_box,
     legacy_window_height,
     migrate_top_left,
-    panel_box,
     to_top_left,
     window_height,
     window_width,
@@ -55,45 +53,3 @@ def test_migration_keeps_feet_on_the_same_pixel() -> None:
     new_x, new_y = to_top_left(center_x, center_y, 316, 529)
     assert new_y + 529 == old_y + legacy_window_height(pet_size)
     assert new_x + 158 == old_x + (pet_size + 2 * PAD_X) // 2
-
-
-# ------------------------------------------------------------ 半透明面板
-
-
-def test_panel_box_wraps_head_and_feet_with_padding() -> None:
-    box = panel_box(220, 400.0)
-    assert box.x == PAD_X - PANEL_PAD
-    assert box.y == TOP - PANEL_PAD
-    assert box.width == 220 + 2 * PANEL_PAD
-    assert box.bottom == 400.0 + PANEL_PAD
-
-
-def test_panel_box_stays_inside_the_window_for_every_size() -> None:
-    for size in (170, 220, 290):
-        content_bottom = TOP + size
-        box = panel_box(size, content_bottom)
-        assert box.x >= 0
-        assert box.right <= window_width(size)
-        assert box.y >= 0
-        assert box.bottom <= window_height(content_bottom)
-
-
-def test_panel_box_follows_the_feet_when_the_body_grows() -> None:
-    short = panel_box(220, float(TOP + 220))
-    long = panel_box(220, 420.0)
-    assert long.height > short.height
-    assert long.y == short.y
-
-
-def test_panel_box_never_shrinks_below_the_head() -> None:
-    """躯体被关掉时 content_bottom 可能小于头部盒子底边，面板仍要盖住整颗头。"""
-    box = panel_box(220, 100.0)
-    assert box.bottom >= TOP + 220
-
-
-def test_box_contains_includes_edges() -> None:
-    box = panel_box(220, 400.0)
-    assert box.contains(box.x, box.y) is True
-    assert box.contains(box.right, box.bottom) is True
-    assert box.contains(box.x - 1, box.y) is False
-    assert box.contains(box.center_x, box.bottom + 1) is False

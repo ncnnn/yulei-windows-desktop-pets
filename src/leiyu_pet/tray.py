@@ -6,12 +6,14 @@ from PySide6.QtCore import QObject
 from PySide6.QtGui import QAction, QActionGroup
 from PySide6.QtWidgets import QApplication, QMenu, QStyle, QSystemTrayIcon
 
+from . import frosted_ui
 from .autostart import is_enabled, self_check_requested_but_missing, set_enabled
 from .config import Config, save_config
 from .context_menu import ROLE_NAMES
 from .crosstalk import LINE_PRESETS
 from .paths import config_path
 from .reminders import BREAK_PRESETS
+from .stick_body import ACTION_LABELS, RANDOM_ACTIONS
 
 ROLES = ("lei", "yu")
 DISTANCE_VALUES = (8, 32, 80)
@@ -82,6 +84,15 @@ class TrayManager(QObject):
         self._actions = []
         self._menu.clear()
         self._build_contents()
+        self._apply_frosted()
+
+    def _apply_frosted(self) -> None:
+        plan = getattr(self.runtime, "frosted_plan", None)
+        if plan is None:
+            plan = frosted_ui.current_plan(True)
+        for submenu in self._menu.findChildren(QMenu):
+            frosted_ui.apply_menu(submenu, plan)
+        frosted_ui.apply_menu(self._menu, plan)
 
     def _add_action(
         self,
@@ -347,12 +358,21 @@ class TrayManager(QObject):
         )
         self._add_action(
             self._menu,
-            "半透明磨砂面板",
-            self._toggle_glass,
+            "磨砂菜单与设置",
+            self._toggle_frosted,
             checkable=True,
             pass_checked=True,
-            checked=bool(getattr(self.config, "glass_enabled", True)),
+            checked=bool(getattr(self.config, "frosted_ui_enabled", True)),
         )
+
+        action_menu = self._menu.addMenu("让 TA 做个动作")
+        self._submenus.append(action_menu)
+        for state in RANDOM_ACTIONS:
+            self._add_action(
+                action_menu,
+                ACTION_LABELS[state],
+                lambda _checked=False, s=state: self._play_action(s),
+            )
         self._menu.addSeparator()
 
         self._add_action(
@@ -457,12 +477,15 @@ class TrayManager(QObject):
         self.config.duel_effect_enabled = bool(checked)
         self.runtime.set_duel_effect_enabled(bool(checked))
 
-    def _toggle_glass(self, checked: bool) -> None:
-        self.config.glass_enabled = bool(checked)
-        self.runtime.set_glass(
-            bool(checked),
-            int(getattr(self.config, "corner_radius", 14)),
-        )
+    def _toggle_frosted(self, checked: bool) -> None:
+        self.config.frosted_ui_enabled = bool(checked)
+        self.runtime.set_frosted_ui(bool(checked))
+
+    def _play_action(self, state: str) -> None:
+        """托盘没有「当前角色」，两只一起做同一个动作，像被同时点名。"""
+        for window in self.runtime.windows.values():
+            if window.isVisible():
+                window.play_stick_action(state, seconds=3.2)
 
     def _toggle_stick_random(self, checked: bool) -> None:
         self.config.stick_random_action_enabled = bool(checked)

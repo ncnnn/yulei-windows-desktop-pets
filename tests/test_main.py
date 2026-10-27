@@ -91,7 +91,7 @@ class FakeRuntime:
         self.stick_actions: tuple[bool, int] | None = None
         self.auto_dialog: tuple[int, str] | None = None
         self.duel_effect: bool | None = None
-        self.glass: tuple[bool, int] | None = None
+        self.frosted: bool | None = None
         self.windows = {"lei": FakeWindow(), "yu": FakeWindow()}
         self.controller = FakeController()
         self.assistant = FakeAssistant()
@@ -120,8 +120,8 @@ class FakeRuntime:
     def set_duel_effect_enabled(self, enabled: bool) -> None:
         self.duel_effect = enabled
 
-    def set_glass(self, enabled: bool, radius: int | None = None) -> None:
-        self.glass = (bool(enabled), int(radius if radius is not None else 14))
+    def set_frosted_ui(self, enabled: bool) -> None:
+        self.frosted = bool(enabled)
 
     def set_opacity(self, value: float) -> None:
         self.opacity = value
@@ -215,7 +215,7 @@ def test_apply_config_propagates_to_runtime_and_windows() -> None:
         cfg.auto_move_dialog_mode,
     )
     assert runtime.duel_effect is cfg.duel_effect_enabled
-    assert runtime.glass == (cfg.glass_enabled, cfg.corner_radius)
+    assert runtime.frosted is cfg.frosted_ui_enabled
     assert runtime.assistant.config["hourly"] is cfg.hourly_chime
     assert runtime.assistant.quiet is not None
 

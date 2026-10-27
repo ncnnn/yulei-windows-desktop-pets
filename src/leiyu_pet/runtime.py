@@ -11,6 +11,7 @@ from typing import cast
 from PySide6.QtCore import QObject, QPoint, QRect, QTimer
 from PySide6.QtGui import QGuiApplication
 
+from . import frosted_ui
 from .assistant import PetAssistant
 from .audio import AudioCoordinator
 from .auto_dialog import (
@@ -20,13 +21,13 @@ from .auto_dialog import (
 )
 from .context_menu import ContextMenuManager
 from .duel_effect import DuelEffect
-from .glass import DEFAULT_RADIUS, REASON_LABELS, REASON_OK, clamp_radius, plan_glass
+from .frosted import MENU_RADIUS
 from .layout import to_top_left
 from .models import AssetPack, Role
 from .pet_controller import PetController
 from .pet_window import PetWindow
-from .platform_win import display_capabilities, keep_window_on_screen
-from .stick_body import DANCE, WAVE
+from .platform_win import keep_window_on_screen
+from .stick_body import RANDOM_ACTIONS
 from .wander import PlayArea, clamp_position, next_target
 
 #: 决斗特效的触发门槛：歪头超过该角度、或正在拖动时不出现。
@@ -87,9 +88,8 @@ class PetRuntime(QObject):
         self._last_notice_at = 0.0
         self._duel_enabled = True
         self._duel: DuelEffect | None = None
-        # 半透明面板：记住用户选的圆角，降级时只丢磨砂不丢半径。
-        self._glass_enabled = True
-        self._glass_radius = DEFAULT_RADIUS
+        # 磨砂 UI：只影响菜单与设置窗口，桌面宠物窗口始终绝对透明。
+        self._frosted_enabled = True
         self.controller.conversation_started.connect(self._on_conversation_started)
         self.assistant.notice.connect(self._stamp_notice)
 
@@ -153,43 +153,28 @@ class PetRuntime(QObject):
             window.set_always_on_top(bool(value))
         self._persist_setting("always_on_top", bool(value))
 
-    # -------------------------------------------------------- 半透明面板
+    # ------------------------------------------------------------ 磨砂 UI
 
-    def set_glass(self, enabled: bool, radius: int | None = None) -> None:
-        """半透明磨砂面板：磨砂可降级，圆角始终保留。
+    def set_frosted_ui(self, enabled: bool) -> None:
+        """右键/托盘菜单与设置窗口的磨砂开关。
 
-        只画不改窗口标志，所以点击穿透与置顶（降级顺序里的前两位）不受影响。
+        只改 UI 材质，绝不碰桌宠窗口——主窗口必须保持绝对透明（见
+        ``PetWindow.nativeEvent`` 的像素级穿透）。
         """
-        corner = clamp_radius(self._glass_radius if radius is None else radius)
-        compositing, remote = display_capabilities()
-        plan = plan_glass(
-            enabled=bool(enabled),
-            radius=corner,
-            compositing=compositing,
-            remote=remote,
-        )
-        for window in self.windows.values():
-            window.apply_glass_plan(plan)
-        self._glass_enabled = bool(enabled)
-        self._glass_radius = corner
-        self._persist_setting("glass_enabled", bool(enabled))
-        self._persist_setting("corner_radius", corner)
-        if enabled and plan.reason != REASON_OK:
-            logger.info("半透明面板降级：%s", REASON_LABELS.get(plan.reason, plan.reason))
-
-    def toggle_glass(self) -> bool:
-        """右键/托盘开关用：翻转面板开关并落盘，返回切换后的状态。"""
-        enabled = not self._glass_enabled
-        self.set_glass(enabled, self._glass_radius)
-        return enabled
+        self._frosted_enabled = bool(enabled)
+        self._persist_setting("frosted_ui_enabled", self._frosted_enabled)
+        plan = self.frosted_plan
+        if plan.reason != "ok":
+            logger.info("磨砂 UI 降级：%s", plan.describe())
 
     @property
-    def glass_enabled(self) -> bool:
-        return self._glass_enabled
+    def frosted_enabled(self) -> bool:
+        return self._frosted_enabled
 
     @property
-    def glass_radius(self) -> int:
-        return self._glass_radius
+    def frosted_plan(self):
+        """当前菜单要用的材质计划（每次现算，系统能力变化也能跟上）。"""
+        return frosted_ui.current_plan(self._frosted_enabled, MENU_RADIUS)
 
     def set_wander_enabled(self, enabled: bool, interval_seconds: int | None = None) -> None:
         if interval_seconds is not None:
@@ -391,7 +376,9 @@ class PetRuntime(QObject):
         if not candidates:
             return
         window = random.choice(candidates)
-        window.play_stick_action(random.choice((WAVE, DANCE)), seconds=random.uniform(2.4, 3.6))
+        window.play_stick_action(
+            random.choice(RANDOM_ACTIONS), seconds=random.uniform(2.4, 3.6)
+        )
 
     def _on_countdown(self, text: str) -> None:
         """番茄钟每秒刷新常驻气泡；正在说话时由控制器自动让位、说完补上。"""

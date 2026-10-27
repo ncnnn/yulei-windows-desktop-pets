@@ -189,19 +189,19 @@ def test_auto_dialog_values_are_validated(tmp_path: Path) -> None:
     assert config.auto_move_dialog_mode == "crosstalk"
 
 
-def test_corner_radius_is_clamped(tmp_path: Path) -> None:
-    path = tmp_path / "config.json"
-    path.write_text(json.dumps({"corner_radius": 999}), encoding="utf-8")
-    assert load_config(path).corner_radius == 28
-    path.write_text(json.dumps({"corner_radius": -4}), encoding="utf-8")
-    assert load_config(path).corner_radius == 0
-    path.write_text(json.dumps({"corner_radius": "12"}), encoding="utf-8")
-    assert load_config(path).corner_radius == 12
-
-
-def test_glass_defaults_are_on(tmp_path: Path) -> None:
+def test_frosted_ui_defaults_on(tmp_path: Path) -> None:
+    """磨砂只作用于菜单/设置，主窗口保持透明，所以默认开启是安全的。"""
     path = tmp_path / "config.json"
     path.write_text(json.dumps({}), encoding="utf-8")
+    assert load_config(path).frosted_ui_enabled is True
+
+
+def test_old_glass_keys_are_ignored(tmp_path: Path) -> None:
+    """2.1.x 的 glass_enabled / corner_radius 已废弃，读旧配置不能报错。"""
+    path = tmp_path / "config.json"
+    path.write_text(
+        json.dumps({"glass_enabled": False, "corner_radius": 20}), encoding="utf-8"
+    )
     cfg = load_config(path)
-    assert cfg.glass_enabled is True
-    assert cfg.corner_radius == 14
+    assert cfg.frosted_ui_enabled is True
+    assert not hasattr(cfg, "glass_enabled")

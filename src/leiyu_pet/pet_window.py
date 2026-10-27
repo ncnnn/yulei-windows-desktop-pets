@@ -14,11 +14,8 @@ from PySide6.QtGui import (
     QLinearGradient,
     QMouseEvent,
     QPainter,
-    QPainterPath,
     QPaintEvent,
-    QPen,
     QPixmap,
-    QRadialGradient,
     QTransform,
 )
 from PySide6.QtWidgets import QWidget
@@ -31,20 +28,19 @@ from .animation import (
     clamp_pet_size,
 )
 from .caption_widget import CaptionWidget
-from .glass import DEFAULT_RADIUS, GlassPlan, plan_glass, radius_for
 from .layout import (
     BOTTOM_EXTRA,
     PAD_X,
     TOP,
     head_box,
-    panel_box,
     window_height,
     window_width,
 )
 from .models import Role
+from .platform_win import HTTRANSPARENT, nchittest_point
 from .proximity import Rect
 from .status_widget import STATUS_HEIGHT, StatusWidget
-from .stick_body import DRAG, IDLE, StickAnimator
+from .stick_body import DRAG, IDLE, StickAnimator, hits_pose
 from .stick_render import StickRenderer
 
 FRAME_MS = int(FRAME_SECONDS * 1000)
@@ -57,20 +53,9 @@ MIN_FLIP_SCALE = SIDE_VIEW_THRESHOLD
 DEFAULT_BODY_RATIO = 0.85
 DEFAULT_LINE_WIDTH = 5.0
 DEFAULT_NECK_OVERLAP = 6.0
-#: 命中测试里躯干的宽度（以线宽为基准），避免形成大片「看不见却吃点击」的死区。
-TORSO_HIT_FACTOR = 2.2
-MIN_TORSO_HIT_HALF_WIDTH = 9.0
-
-#: 半透明面板的配色：上浅下深，像一块压在壁纸上的磨砂玻璃。
-GLASS_TINT_TOP = QColor(34, 38, 48, 46)
-GLASS_TINT_MIDDLE = QColor(26, 30, 38, 62)
-GLASS_TINT_BOTTOM = QColor(18, 20, 27, 82)
-#: 底部内阴影：让面板「压」在壁纸上有厚度，而不是一块平贴的色片。
-GLASS_DEPTH = QColor(0, 0, 0, 52)
-GLASS_BORDER = QColor(255, 255, 255, 52)
-#: 磨砂层：中心柔光 + 顶部一道高光，模拟磨砂玻璃把光打散的样子。
-GLASS_FROST_GLOW = QColor(255, 255, 255, 30)
-GLASS_HIGHLIGHT = QColor(255, 255, 255, 64)
+#: 火柴人线条的命中容差（像素）：线宽越粗容差越大，视觉与手感才对得上。
+STICK_HIT_FACTOR = 1.6
+MIN_STICK_HIT_PX = 6.0
 
 
 class PetWindow(QWidget):
@@ -125,17 +110,13 @@ class PetWindow(QWidget):
         self._renderer = StickRenderer()
         #: 侧面用的程序化剪影（由 alpha 通道生成，换头像时重建一次）。
         self._side_pixmap: QPixmap | None = None
-        #: 半透明/磨砂面板；默认关闭，由运行时按配置下发计划。
-        self._glass = plan_glass(enabled=False, radius=DEFAULT_RADIUS)
-        #: 面板纹理缓存（几何/样式不变就复用，避免每帧重画渐变）。
-        self._glass_cache: QImage | None = None
-        self._glass_key: tuple[int, int, bool, int] | None = None
 
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
             | Qt.WindowType.Tool
             | Qt.WindowType.WindowDoesNotAcceptFocus
+            | Qt.WindowType.NoDropShadowWindowHint
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
@@ -400,136 +381,31 @@ class PetWindow(QWidget):
     def alpha_bounds(self) -> tuple[float, float, float, float] | None:
         return self._alpha_bounds
 
-    # ------------------------------------------------------------ 玻璃面板
+    # ------------------------------------------------------------ 鼠标穿透
 
-    @property
-    def glass_plan(self) -> GlassPlan:
-        return self._glass
+    def nativeEvent(self, event_type, message):
+        """Windows 像素级穿透：透明处返回 HTTRANSPARENT，事件直落到底层窗口。
 
-    @property
-    def glass_enabled(self) -> bool:
-        return self._glass.panel
+        这是「不规则透明窗口」的关键：不靠轮询光标、也不靠 `WA_TransparentForMouseEvents`
+        （那是整窗开关，连大头都点不到）。命中判定仍交给 `hit_test()`，所以穿透
+        口径与视觉完全一致——只有大头像素、火柴人线条、气泡与状态胶囊算「实体」。
 
-    @property
-    def glass_radius(self) -> int:
-        return self._glass.radius
-
-    @property
-    def glass_frosted(self) -> bool:
-        return self._glass.frosted
-
-    def set_glass(
-        self,
-        enabled: bool,
-        radius: int,
-        *,
-        compositing: bool = True,
-        remote: bool = False,
-    ) -> None:
-        """按配置与桌面能力决定面板样式（磨砂可降级，圆角保留）。"""
-        self.apply_glass_plan(
-            plan_glass(enabled=enabled, radius=radius, compositing=compositing, remote=remote)
-        )
-
-    def apply_glass_plan(self, plan: GlassPlan) -> None:
-        self._glass = plan
-        self._glass_cache = None
-        self.update()
-
-    def panel_rect(self) -> QRect:
-        """面板的窗口局部整数矩形；面板关闭时返回空矩形。
-
-        拖拽热区按这个**矩形**算，不按圆角裁剪——四个角上仍是可点的，
-        否则圆角附近会出现「看得见却点不动」的缝。
+        非 Windows、或不是这条消息时交回 Qt 默认处理。
         """
-        if not self._glass.panel:
-            return QRect()
-        box = panel_box(self._pet_size, self._content_bottom())
-        return QRect(
-            int(round(box.x)),
-            int(round(box.y)),
-            int(round(box.width)),
-            int(round(box.height)),
-        )
+        if event_type != b"windows_generic_MSG":
+            return super().nativeEvent(event_type, message)
+        point = nchittest_point(int(message))
+        if point is None:
+            # 不认识的 Windows 消息交回 Qt（返回 False = 未处理，Qt 继续默认流程）。
+            return False, 0
+        local = self.mapFromGlobal(QPoint(point[0], point[1]))
+        if not self.hit_test(local):
+            return True, HTTRANSPARENT
+        return False, 0
 
-    def _paint_glass(self, painter: QPainter) -> None:
-        """贴一张缓存好的面板纹理。
-
-        面板是静态的，只有几何或样式变化时才重画；否则每帧重算渐变与路径
-        会白白多花 1ms 以上（30fps 下相当于多烧 5% 的单核 CPU）。
-        """
-        image = self._glass_image()
-        if image is None:
-            return
-        painter.drawImage(QRectF(self.panel_rect()), image)
-
-    def _glass_image(self) -> QImage | None:
-        if not self._glass.panel:
-            return None
-        rect = self.panel_rect()
-        if rect.isEmpty():
-            return None
-        key = (rect.width(), rect.height(), self._glass.frosted, self._glass.radius)
-        if self._glass_cache is not None and self._glass_key == key:
-            return self._glass_cache
-        scale = max(1.0, float(self.devicePixelRatioF()))
-        image = QImage(
-            int(math.ceil(rect.width() * scale)),
-            int(math.ceil(rect.height() * scale)),
-            QImage.Format.Format_ARGB32_Premultiplied,
-        )
-        image.fill(Qt.GlobalColor.transparent)
-        painter = QPainter(image)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        painter.scale(scale, scale)
-        painter.translate(-rect.left(), -rect.top())
-        self._draw_glass(painter, QRectF(rect), self._glass)
-        painter.end()
-        self._glass_cache = image
-        self._glass_key = key
-        return image
-
-    @staticmethod
-    def _draw_glass(painter: QPainter, rect: QRectF, plan: GlassPlan) -> None:
-        """画半透明圆角面板：先铺渐变底，再叠磨砂高光，最后描一圈细边。"""
-        radius = radius_for(rect.width(), rect.height(), plan.radius)
-        path = QPainterPath()
-        path.addRoundedRect(rect, radius, radius)
-
-        tint = QLinearGradient(rect.topLeft(), rect.bottomLeft())
-        tint.setColorAt(0.0, GLASS_TINT_TOP)
-        tint.setColorAt(0.55, GLASS_TINT_MIDDLE)
-        tint.setColorAt(1.0, GLASS_TINT_BOTTOM)
-        painter.fillPath(path, QBrush(tint))
-
-        if plan.frosted:
-            painter.save()
-            painter.setClipPath(path)
-            glow = QRadialGradient(
-                QPointF(rect.center().x(), rect.top() + rect.height() * 0.18),
-                max(rect.width(), rect.height()) * 0.8,
-            )
-            glow.setColorAt(0.0, GLASS_FROST_GLOW)
-            glow.setColorAt(1.0, QColor(255, 255, 255, 0))
-            painter.fillRect(rect, QBrush(glow))
-            highlight = QRectF(
-                rect.left(), rect.top(), rect.width(), min(1.6, rect.height() / 3.0)
-            )
-            edge = QLinearGradient(highlight.topLeft(), highlight.topRight())
-            edge.setColorAt(0.0, QColor(255, 255, 255, 0))
-            edge.setColorAt(0.5, GLASS_HIGHLIGHT)
-            edge.setColorAt(1.0, QColor(255, 255, 255, 0))
-            painter.fillRect(highlight, QBrush(edge))
-            depth = QLinearGradient(rect.topLeft(), rect.bottomLeft())
-            depth.setColorAt(0.0, QColor(0, 0, 0, 0))
-            depth.setColorAt(0.55, QColor(0, 0, 0, 0))
-            depth.setColorAt(1.0, GLASS_DEPTH)
-            painter.fillRect(rect, QBrush(depth))
-            painter.restore()
-
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.setPen(QPen(GLASS_BORDER, 1.0))
-        painter.drawPath(path)
+    def hit_test_global(self, global_pos: QPoint) -> bool:
+        """屏幕坐标版的命中测试，供穿透判定与调试复用。"""
+        return self.hit_test(self.mapFromGlobal(global_pos))
 
     # ---------------------------------------------------------------- 动画
 
@@ -702,12 +578,14 @@ class PetWindow(QWidget):
         return outer * base
 
     def paintEvent(self, event: QPaintEvent) -> None:
-        """分层绘制：玻璃面板 → 躯体 → 头部 → 颈部接缝，人物整体再做 Y 轴翻转。"""
+        """分层绘制：躯体 → 头部 → 颈部接缝，人物整体再做 Y 轴翻转。
+
+        窗口**不画任何底**：没画的像素就是全透明，直接透出桌面。这也是穿透
+        判定能只看「画出来的东西」的前提。
+        """
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-        # 面板不参与翻转：它是对称的静态底，翻不翻都一样，先画更省事。
-        self._paint_glass(painter)
         if self._pixmap.isNull():
             return
 
@@ -842,22 +720,37 @@ class PetWindow(QWidget):
         self.context.emit(self._role, position)
 
     def hit_test(self, local: QPoint) -> bool:
-        """命中测试：字幕气泡可拖，面板按矩形，头按 PNG alpha，躯干按窄带。
+        """命中测试 = 「这一像素画了东西吗」。
 
-        面板是块看得见的东西，整块都可点/可拖；而头部用 alpha 判定，是为了
-        避免图片四周的透明留白吃掉点击。躯干是细线，若整条矩形都吃点击会形成
-        大片「看不见却能点」的死区，所以只认中心线两侧很窄的一条；手臂不参与命中。
+        只有四类区域算实体：大头的 PNG alpha、火柴人的线条、正在显示的气泡、
+        正在显示的状态胶囊。其余一律视为透明——主窗口的穿透判定（HTTRANSPARENT）
+        也用这个函数，所以视觉与点击口径永远一致。
         """
         if self._click_through:
             return False
-        if self._caption.caption() and self._caption.geometry().contains(local):
-            return True
-        if self._glass.panel and self.panel_rect().contains(local):
+        if self._hit_caption(local) or self._hit_status(local):
             return True
         point = QPointF(local)
         if self._hit_head(point):
             return True
-        return self._stick_enabled and self._hit_torso(point)
+        return self._stick_enabled and self._hit_stick(point)
+
+    def _hit_caption(self, local: QPoint) -> bool:
+        """只有气泡本体（含文字时的圆角矩形）可点，整条字幕区不算。"""
+        if not self._caption.caption():
+            return False
+        bubble = self._caption.bubble_rect()
+        if not bubble.isValid():
+            return False
+        return bubble.translated(self._caption.geometry().topLeft()).contains(local)
+
+    def _hit_status(self, local: QPoint) -> bool:
+        if not self._status.text() or not self._status.isVisible():
+            return False
+        pill = self._status.pill_rect()
+        if not pill.isValid():
+            return False
+        return pill.translated(self._status.geometry().topLeft()).contains(local)
 
     def _hit_head(self, point: QPointF) -> bool:
         box = self._character_box()
@@ -876,15 +769,24 @@ class PetWindow(QWidget):
             return False
         return self._alpha.pixelColor(px, py).alpha() >= ALPHA_HIT_THRESHOLD
 
-    def _hit_torso(self, point: QPointF) -> bool:
+    def _hit_stick(self, point: QPointF) -> bool:
+        """按骨架线段判命中：手臂、腿部也真的能点，而不是只有一个矩形带。
+
+        把光标点换到归一化骨架坐标（Y 轴翻转时先反镜像），再算点到线段的
+        距离；容差随线宽放大，握着线条边缘也能拖。
+        """
         center_x, neck_y = self._neck_point()
         unit = self._body_height()
         if unit <= 0.0:
             return False
-        half = max(MIN_TORSO_HIT_HALF_WIDTH, self._stick_line_width * TORSO_HIT_FACTOR)
-        top = neck_y - unit * 0.05
-        bottom = neck_y + unit
-        return abs(point.x() - center_x) <= half and top <= point.y() <= bottom
+        flip = self._spin_flip()
+        x = point.x()
+        if flip not in (0.0, 1.0):
+            x = center_x + (x - center_x) / flip
+        nx = (x - center_x) / unit
+        ny = (point.y() - neck_y) / unit
+        tolerance = max(MIN_STICK_HIT_PX, self._stick_line_width * STICK_HIT_FACTOR) / unit
+        return hits_pose(self._stick.pose(), nx, ny, tolerance)
 
     def _can_drag(self, event: QMouseEvent) -> bool:
         if self._locked:

@@ -1,4 +1,7 @@
-"""设置中心：分页（声音 / 互动 / 系统 / 关于），控件改动即时生效并落盘。
+"""设置中心：分页（声音 / 互动 / 外观 / 系统 / 关于），控件改动即时生效并落盘。
+
+窗口本身用磨砂材质（无边框 + 半透明底 + 系统 Acrylic，失败退化为自绘半透明）。
+桌宠主窗口不参与——它必须绝对透明，见 ``PetWindow.nativeEvent``。
 
 安装版与便携版共用同一套代码，所以两边的设置项完全一致；差异只体现在
 「关于」页显示的数据目录（``%LOCALAPPDATA%`` 还是 exe 同级 ``data``）。
@@ -6,8 +9,8 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QTime, QUrl
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import QRectF, Qt, QTime, QUrl
+from PySide6.QtGui import QDesktopServices, QMouseEvent, QPainter, QPaintEvent, QPalette
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -15,16 +18,18 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFormLayout,
     QGroupBox,
+    QHBoxLayout,
     QLabel,
     QPushButton,
     QSlider,
     QTabWidget,
     QTimeEdit,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
-from . import __version__, paths
+from . import __version__, frosted_ui, paths
 from .auto_dialog import CHANCE_LABELS, DIALOG_CHANCES, DIALOG_MODES, MODE_LABELS
 from .autostart import is_enabled, set_enabled
 from .config import Config, save_config
@@ -54,7 +59,25 @@ class SettingsDialog(QDialog):
         self.runtime = runtime
         self.config = config
         self.setWindowTitle(f"雷余双桌宠设置 — v{__version__}")
-        self.setMinimumWidth(420)
+        self.setMinimumWidth(460)
+        #: 磨砂关闭时要还原的原始调色板（构造时先存一份）。
+        self._plain_palette = QPalette(self.palette())
+        self._drag_offset = None
+        self._plan = frosted_ui.dialog_plan(bool(getattr(config, "frosted_ui_enabled", True)))
+
+        self._header = QWidget(self)
+        header = QHBoxLayout(self._header)
+        header.setContentsMargins(6, 2, 2, 2)
+        self._title = QLabel(f"雷余双桌宠设置 — v{__version__}")
+        header.addWidget(self._title)
+        header.addStretch(1)
+        close_button = QToolButton(self._header)
+        close_button.setObjectName("dialog_close")
+        close_button.setText("×")
+        close_button.setAutoRaise(True)
+        close_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        close_button.clicked.connect(self.reject)
+        header.addWidget(close_button)
 
         self._tabs = QTabWidget(self)
         self._tabs.addTab(self._build_sound_tab(), "声音")
@@ -68,8 +91,67 @@ class SettingsDialog(QDialog):
         buttons.accepted.connect(self.accept)
 
         layout = QVBoxLayout(self)
-        layout.addWidget(self._tabs)
+        layout.setContentsMargins(14, 10, 14, 12)
+        layout.setSpacing(8)
+        layout.addWidget(self._header)
+        layout.addWidget(self._tabs, 1)
         layout.addWidget(buttons)
+        self._apply_material()
+
+    # ------------------------------------------------------------ 磨砂材质
+
+    def _apply_material(self) -> None:
+        """按当前计划切换「无边框磨砂」与「普通对话框」两套外观。"""
+        plan = self._plan
+        if plan.enabled:
+            self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
+            self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        else:
+            self.setWindowFlag(Qt.WindowType.FramelessWindowHint, False)
+            self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+        if self.isVisible():
+            self.show()
+        if plan.enabled:
+            frosted_ui.prepare_dialog(self, plan)
+        else:
+            self.setPalette(self._plain_palette)
+            self.setStyleSheet("")
+        self.update()
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        if not self._plan.enabled:
+            super().paintEvent(event)
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        frosted_ui.paint_background(painter, QRectF(self.rect()), self._plan)
+
+    def showEvent(self, event) -> None:  # noqa: N802 - Qt 命名
+        super().showEvent(event)
+        if self._plan.enabled:
+            frosted_ui.apply_native(self, self._plan)
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if (
+            self._plan.enabled
+            and event.button() == Qt.MouseButton.LeftButton
+            and event.position().y() <= self._header.geometry().bottom()
+        ):
+            self._drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if self._drag_offset is not None:
+            self.move(event.globalPosition().toPoint() - self._drag_offset)
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        self._drag_offset = None
+        super().mouseReleaseEvent(event)
 
     # ---------------------------------------------------------------- 声音
     def _build_sound_tab(self) -> QWidget:
@@ -352,37 +434,21 @@ class SettingsDialog(QDialog):
         action_form.addRow(hint)
         layout.addWidget(action_group)
 
-        glass_group = QGroupBox("窗口质感")
-        glass_form = QFormLayout(glass_group)
-        self.glass_check = QCheckBox("半透明磨砂面板（关掉就只剩透明背景）")
-        self.glass_check.setObjectName("glass")
-        self.glass_check.setChecked(bool(getattr(self.config, "glass_enabled", True)))
-        self.glass_check.toggled.connect(self._on_glass)
-        glass_form.addRow(self.glass_check)
+        frosted_group = QGroupBox("界面材质")
+        frosted_form = QFormLayout(frosted_group)
+        self.frosted_check = QCheckBox("磨砂玻璃（右键菜单与设置窗口）")
+        self.frosted_check.setObjectName("frosted_ui")
+        self.frosted_check.setChecked(bool(getattr(self.config, "frosted_ui_enabled", True)))
+        self.frosted_check.toggled.connect(self._on_frosted)
+        frosted_form.addRow(self.frosted_check)
 
-        self.corner_radius_combo = QComboBox()
-        self.corner_radius_combo.setObjectName("corner_radius")
-        for radius, label in (
-            (0, "直角 0px"),
-            (8, "微圆 8px"),
-            (14, "标准 14px"),
-            (20, "圆润 20px"),
-            (28, "很圆 28px"),
-        ):
-            self.corner_radius_combo.addItem(label, radius)
-        current_radius = int(getattr(self.config, "corner_radius", 14))
-        radius_index = self.corner_radius_combo.findData(current_radius)
-        self.corner_radius_combo.setCurrentIndex(radius_index if radius_index >= 0 else 2)
-        self.corner_radius_combo.currentIndexChanged.connect(self._on_corner_radius)
-        glass_form.addRow("圆角半径", self.corner_radius_combo)
-
-        glass_hint = QLabel(
-            "面板只画在透明背景上，不改变置顶与鼠标穿透；"
-            "系统关闭透明效果或处于远程桌面时自动省略磨砂层，圆角保留。"
+        frosted_hint = QLabel(
+            "磨砂只作用于菜单和这个设置窗口。桌宠本身始终绝对透明："
+            "除了大头与火柴人线条，其余区域连点击都会穿透到桌面。"
         )
-        glass_hint.setWordWrap(True)
-        glass_form.addRow(glass_hint)
-        layout.addWidget(glass_group)
+        frosted_hint.setWordWrap(True)
+        frosted_form.addRow(frosted_hint)
+        layout.addWidget(frosted_group)
         layout.addStretch(1)
         return page
 
@@ -679,33 +745,14 @@ class SettingsDialog(QDialog):
                 setter(axis)
         self._persist()
 
-    def _on_glass(self, checked: bool) -> None:
-        self.config.glass_enabled = bool(checked)
-        self._apply_glass()
-        self._persist()
-
-    def _on_corner_radius(self, index: int) -> None:
-        radius = int(self.corner_radius_combo.itemData(index))
-        self.config.corner_radius = radius
-        self._apply_glass()
-        self._persist()
-
-    def _apply_glass(self) -> None:
-        setter = getattr(self.runtime, "set_glass", None)
+    def _on_frosted(self, checked: bool) -> None:
+        self.config.frosted_ui_enabled = bool(checked)
+        setter = getattr(self.runtime, "set_frosted_ui", None)
         if callable(setter):
-            setter(
-                bool(getattr(self.config, "glass_enabled", True)),
-                int(getattr(self.config, "corner_radius", 14)),
-            )
-            return
-        from .glass import plan_glass
-
-        plan = plan_glass(
-            enabled=bool(getattr(self.config, "glass_enabled", True)),
-            radius=int(getattr(self.config, "corner_radius", 14)),
-        )
-        for window in self.runtime.windows.values():
-            window.apply_glass_plan(plan)
+            setter(bool(checked))
+        self._plan = frosted_ui.dialog_plan(bool(checked))
+        self._apply_material()
+        self._persist()
 
     def _on_hourly(self, checked: bool) -> None:
         self.config.hourly_chime = bool(checked)

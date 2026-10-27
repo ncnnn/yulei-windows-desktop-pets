@@ -22,10 +22,71 @@ DANCE = "dance"
 JUMP = "jump"
 SPIN = "spin_360"
 DRAG = "drag"
-#: 预留但暂未实现的状态名，供后续扩展（不改结构即可加）。
-RESERVED = ("happy", "fall")
+#: 2.1.1 新增的十款动作，轮廓互不相似（合掌/拉伸/弯腰/托腮/跑/睡/踢/蹲/比心/敬礼）。
+CLAP = "clap"
+STRETCH = "stretch"
+BOW = "bow"
+THINK = "think"
+RUN = "run"
+SLEEP = "sleep"
+KICK = "kick"
+SQUAT = "squat"
+HEART = "heart"
+SALUTE = "salute"
 
-TIMED_STATES = frozenset({WAVE, DANCE, JUMP})
+#: 中文名，用于右键「动作」菜单与日志。
+ACTION_LABELS = {
+    IDLE: "待机",
+    WAVE: "招手",
+    DANCE: "跳舞",
+    JUMP: "跳跃",
+    SPIN: "转身",
+    DRAG: "被拎起",
+    CLAP: "鼓掌",
+    STRETCH: "伸懒腰",
+    BOW: "鞠躬",
+    THINK: "托腮",
+    RUN: "原地跑",
+    SLEEP: "打瞌睡",
+    KICK: "踢腿",
+    SQUAT: "深蹲",
+    HEART: "比心",
+    SALUTE: "敬礼",
+}
+
+TIMED_STATES = frozenset(
+    {
+        WAVE,
+        DANCE,
+        JUMP,
+        CLAP,
+        STRETCH,
+        BOW,
+        THINK,
+        RUN,
+        SLEEP,
+        KICK,
+        SQUAT,
+        HEART,
+        SALUTE,
+    }
+)
+
+#: 随机动作池：一次性动作都在里面，不含 drag/spin 这类由交互驱动的状态。
+RANDOM_ACTIONS = (
+    WAVE,
+    DANCE,
+    CLAP,
+    STRETCH,
+    BOW,
+    THINK,
+    RUN,
+    SLEEP,
+    KICK,
+    SQUAT,
+    HEART,
+    SALUTE,
+)
 
 #: 各关节在归一化空间里的位置。手臂/腿部各两段。
 SHOULDER_Y = 0.10
@@ -101,6 +162,23 @@ class StickPose:
         )
 
 
+def idle_legs(phase: float) -> tuple[Limb, Limb]:
+    """待机腿部：双脚略分开，静止时也有极缓的重心移动。"""
+    sway = 0.004 * math.sin(2.0 * math.pi * phase / BREATHE_PERIOD)
+    return (
+        Limb(
+            (-HIP_X, HIP_Y),
+            (-(HIP_X + 0.03), KNEE_Y),
+            (-(HIP_X + 0.05 + sway), FOOT_Y),
+        ),
+        Limb(
+            (HIP_X, HIP_Y),
+            (HIP_X + 0.03, KNEE_Y),
+            (HIP_X + 0.05 - sway, FOOT_Y),
+        ),
+    )
+
+
 def idle_pose(phase: float) -> StickPose:
     """待机：身体呼吸起伏 + 手臂轻微摆动，手臂略向外张。"""
     breathe = math.sin(2.0 * math.pi * phase / BREATHE_PERIOD)
@@ -115,15 +193,7 @@ def idle_pose(phase: float) -> StickPose:
         )
         for side in (-1.0, 1.0)
     )
-    legs = tuple(
-        Limb(
-            (side * HIP_X, HIP_Y),
-            (side * (HIP_X + 0.03), KNEE_Y),
-            (side * (HIP_X + 0.05), FOOT_Y),
-        )
-        for side in (-1.0, 1.0)
-    )
-    return StickPose(neck=(0.0, 0.0), hip=hip, arms=arms, legs=legs)  # type: ignore[arg-type]
+    return StickPose(neck=(0.0, 0.0), hip=hip, arms=arms, legs=idle_legs(phase))  # type: ignore[arg-type]
 
 
 def wave_pose(phase: float, progress: float) -> StickPose:
@@ -219,6 +289,217 @@ def drag_pose(phase: float) -> StickPose:
     return StickPose(neck=(0.0, 0.0), hip=(0.0, HIP_Y), arms=arms, legs=legs)  # type: ignore[arg-type]
 
 
+# --------------------------------------------------------------- 十款动作
+# 每个姿势只改关节坐标，不改渲染层；neck 恒为 (0,0)——它是头部挂点，
+# 动了就等于整个人平移，所以「弯腰/低头」都靠髋部与肩部的偏移表达。
+
+
+def clap_pose(phase: float) -> StickPose:
+    """鼓掌：双手在胸前开合，节拍快于呼吸。"""
+    beat = 0.5 + 0.5 * math.sin(phase * 12.0)
+    gap = 0.015 + 0.075 * beat
+    arms = (
+        Limb((-SHOULDER_X, SHOULDER_Y), (-0.10, 0.24), (-gap, 0.29)),
+        Limb((SHOULDER_X, SHOULDER_Y), (0.10, 0.24), (gap, 0.29)),
+    )
+    return StickPose(neck=(0.0, 0.0), hip=(0.0, HIP_Y), arms=arms, legs=idle_legs(phase))  # type: ignore[arg-type]
+
+
+def stretch_pose(phase: float) -> StickPose:
+    """伸懒腰：双臂越过肩线向上拉伸，身体微微后仰，双腿并拢。"""
+    sway = 0.03 * math.sin(phase * 2.2)
+    arms = (
+        Limb((-SHOULDER_X, SHOULDER_Y), (-0.24, -0.04), (-0.20 + sway, -0.26)),
+        Limb((SHOULDER_X, SHOULDER_Y), (0.24, -0.04), (0.20 + sway, -0.26)),
+    )
+    legs = (
+        Limb((-HIP_X, HIP_Y + 0.02), (-0.09, KNEE_Y), (-0.08, FOOT_Y)),
+        Limb((HIP_X, HIP_Y + 0.02), (0.09, KNEE_Y), (0.08, FOOT_Y)),
+    )
+    return StickPose(neck=(0.0, 0.0), hip=(0.0, HIP_Y + 0.02), arms=arms, legs=legs)
+
+
+def bow_pose(phase: float) -> StickPose:
+    """鞠躬：髋部后移形成斜的上身，双手垂到身前。"""
+    bend = 0.5 - 0.5 * math.cos(phase * 2.4)
+    hip_x = 0.20 * bend
+    arms = (
+        Limb(
+            (-SHOULDER_X, SHOULDER_Y),
+            (-0.10, 0.30 + 0.08 * bend),
+            (-0.13, 0.44 + 0.12 * bend),
+        ),
+        Limb(
+            (SHOULDER_X, SHOULDER_Y),
+            (0.10, 0.30 + 0.08 * bend),
+            (0.13, 0.44 + 0.12 * bend),
+        ),
+    )
+    return StickPose(neck=(0.0, 0.0), hip=(hip_x, HIP_Y), arms=arms, legs=idle_legs(phase))  # type: ignore[arg-type]
+
+
+def think_pose(phase: float) -> StickPose:
+    """托腮：一只手折到下巴附近，另一只垂下，肩膀随思考轻微起伏。"""
+    bob = 0.01 * math.sin(phase * 1.6)
+    arms = (
+        Limb((-SHOULDER_X, SHOULDER_Y), (-0.18, 0.30), (-0.16, 0.46)),
+        Limb((SHOULDER_X, SHOULDER_Y), (0.24, 0.30), (0.06, 0.10 + bob)),
+    )
+    return StickPose(neck=(0.0, 0.0), hip=(0.0, HIP_Y), arms=arms, legs=idle_legs(phase))  # type: ignore[arg-type]
+
+
+def run_pose(phase: float) -> StickPose:
+    """原地跑：双腿轮流抬膝，双臂反向摆动。"""
+    swing = math.sin(phase * 8.0)
+    arms = (
+        Limb(
+            (-SHOULDER_X, SHOULDER_Y),
+            (-0.10 - 0.10 * swing, 0.24),
+            (-0.08 - 0.20 * swing, 0.34),
+        ),
+        Limb(
+            (SHOULDER_X, SHOULDER_Y),
+            (0.10 + 0.10 * swing, 0.24),
+            (0.08 + 0.20 * swing, 0.34),
+        ),
+    )
+    legs = (
+        Limb(
+            (-HIP_X, HIP_Y),
+            (-0.14 - 0.04 * max(0.0, swing), 0.68 - 0.14 * max(0.0, swing)),
+            (-0.18, 0.92 - 0.20 * max(0.0, swing)),
+        ),
+        Limb(
+            (HIP_X, HIP_Y),
+            (0.14 + 0.04 * max(0.0, -swing), 0.68 - 0.14 * max(0.0, -swing)),
+            (0.18, 0.92 - 0.20 * max(0.0, -swing)),
+        ),
+    )
+    return StickPose(neck=(0.0, 0.0), hip=(0.0, HIP_Y), arms=arms, legs=legs)
+
+
+def sleep_pose(phase: float) -> StickPose:
+    """打瞌睡：上身塌下去、双手垂到身侧，配合很慢的点头节奏。"""
+    nod = 0.02 * math.sin(phase * 1.1)
+    shoulder_y = SHOULDER_Y + 0.12 + nod
+    arms = (
+        Limb((-SHOULDER_X, shoulder_y), (-0.10, 0.36), (-0.08, 0.52)),
+        Limb((SHOULDER_X, shoulder_y), (0.10, 0.36), (0.08, 0.52)),
+    )
+    legs = (
+        Limb((-HIP_X, HIP_Y + 0.04), (-0.08, KNEE_Y), (-0.16, FOOT_Y)),
+        Limb((HIP_X, HIP_Y + 0.04), (0.08, KNEE_Y), (0.16, FOOT_Y)),
+    )
+    return StickPose(neck=(0.0, 0.0), hip=(0.03, HIP_Y + 0.04), arms=arms, legs=legs)
+
+
+def kick_pose(phase: float) -> StickPose:
+    """踢腿：右腿前踢并收回，双臂外展保持平衡。"""
+    swing = math.sin(phase * 7.5)
+    lift = max(0.0, swing)
+    arms = (
+        Limb((-SHOULDER_X, SHOULDER_Y), (-0.24, 0.20), (-0.30, 0.10)),
+        Limb((SHOULDER_X, SHOULDER_Y), (0.24, 0.20), (0.30, 0.10)),
+    )
+    legs = (
+        Limb((-HIP_X, HIP_Y), (-0.09, KNEE_Y), (-0.08, FOOT_Y)),
+        Limb(
+            (HIP_X, HIP_Y),
+            (0.14 + 0.16 * lift, KNEE_Y - 0.16 * lift),
+            (0.16 + 0.34 * lift, FOOT_Y - 0.38 * lift),
+        ),
+    )
+    return StickPose(neck=(0.0, 0.0), hip=(0.0, HIP_Y), arms=arms, legs=legs)
+
+
+def squat_pose(phase: float) -> StickPose:
+    """深蹲：髋部下沉、膝盖外撇，双臂平举在前。"""
+    depth = 0.5 - 0.5 * math.cos(phase * 2.6)
+    hip_y = HIP_Y + 0.12 * depth
+    shoulder_y = SHOULDER_Y + 0.06 * depth
+    arms = (
+        Limb((-SHOULDER_X, shoulder_y), (-0.18, 0.22 + 0.06 * depth), (-0.16, 0.32 + 0.06 * depth)),
+        Limb((SHOULDER_X, shoulder_y), (0.18, 0.22 + 0.06 * depth), (0.16, 0.32 + 0.06 * depth)),
+    )
+    legs = (
+        Limb((-HIP_X - 0.04 * depth, hip_y), (-0.10 - 0.20 * depth, KNEE_Y - 0.02), (-0.12, FOOT_Y)),
+        Limb((HIP_X + 0.04 * depth, hip_y), (0.10 + 0.20 * depth, KNEE_Y - 0.02), (0.12, FOOT_Y)),
+    )
+    return StickPose(neck=(0.0, 0.0), hip=(0.0, hip_y), arms=arms, legs=legs)
+
+
+def heart_pose(phase: float) -> StickPose:
+    """比心：双手举过头顶在中间合拢，随心跳轻微起伏。"""
+    pulse = 0.012 * math.sin(phase * 3.0)
+    arms = (
+        Limb((-SHOULDER_X, SHOULDER_Y), (-0.16, -0.02 - pulse), (-0.02, -0.20 - pulse)),
+        Limb((SHOULDER_X, SHOULDER_Y), (0.16, -0.02 - pulse), (0.02, -0.20 - pulse)),
+    )
+    return StickPose(neck=(0.0, 0.0), hip=(0.0, HIP_Y), arms=arms, legs=idle_legs(phase))  # type: ignore[arg-type]
+
+
+def salute_pose(phase: float) -> StickPose:
+    """敬礼：右手抬到额前，左臂垂直贴身。"""
+    twitch = 0.004 * math.sin(phase * 4.0)
+    arms = (
+        Limb((-SHOULDER_X, SHOULDER_Y), (-0.12, 0.28), (-0.10, 0.44)),
+        Limb((SHOULDER_X, SHOULDER_Y), (0.34, 0.06), (0.05, 0.0 + twitch)),
+    )
+    return StickPose(neck=(0.0, 0.0), hip=(0.0, HIP_Y), arms=arms, legs=idle_legs(phase))  # type: ignore[arg-type]
+
+
+#: 动作 → 姿势函数；没有映射的状态回落到待机。
+POSE_BUILDERS = {
+    IDLE: idle_pose,
+    DANCE: dance_pose,
+    JUMP: jump_pose,
+    DRAG: drag_pose,
+    CLAP: clap_pose,
+    STRETCH: stretch_pose,
+    BOW: bow_pose,
+    THINK: think_pose,
+    RUN: run_pose,
+    SLEEP: sleep_pose,
+    KICK: kick_pose,
+    SQUAT: squat_pose,
+    HEART: heart_pose,
+    SALUTE: salute_pose,
+}
+
+
+# ------------------------------------------------------------- 线条命中
+# 主窗口没有底板，点击判定必须落在「画出来的线条」上。这里用骨架线段做
+# 点到线段的距离判定，容差按线宽放大，视觉与手感才对得上。
+
+
+def segments(pose: StickPose) -> tuple[tuple[Point, Point], ...]:
+    """骨架的所有线段：躯干 + 每条肢体的两节。"""
+    lines: list[tuple[Point, Point]] = [(pose.neck, pose.hip)]
+    for limb in (*pose.arms, *pose.legs):
+        lines.append((limb.start, limb.joint))
+        lines.append((limb.joint, limb.end))
+    return tuple(lines)
+
+
+def distance_to_segment(x: float, y: float, start: Point, end: Point) -> float:
+    """点到线段的最短距离（归一化坐标）。"""
+    ex, ey = end[0] - start[0], end[1] - start[1]
+    length_sq = ex * ex + ey * ey
+    if length_sq <= 1e-12:
+        return math.hypot(x - start[0], y - start[1])
+    t = ((x - start[0]) * ex + (y - start[1]) * ey) / length_sq
+    t = min(1.0, max(0.0, t))
+    return math.hypot(x - (start[0] + t * ex), y - (start[1] + t * ey))
+
+
+def hits_pose(pose: StickPose, x: float, y: float, tolerance: float) -> bool:
+    """归一化坐标下的线条命中；``tolerance`` 已按单位高度换算。"""
+    limit = max(0.0, float(tolerance))
+    return any(
+        distance_to_segment(x, y, start, end) <= limit for start, end in segments(pose)
+    )
+
+
 @dataclass(slots=True)
 class StickAnimator:
     """动作状态机；只吃 dt，不读时钟，方便单测。"""
@@ -261,14 +542,9 @@ class StickAnimator:
                 remaining = self.duration - self.timer
                 progress = min(1.0, self.timer / fade_in, remaining / fade_out)
             base = wave_pose(self.phase, progress)
-        elif self.state == DANCE:
-            base = dance_pose(self.phase)
-        elif self.state == JUMP:
-            base = jump_pose(self.phase)
-        elif self.state == DRAG:
-            base = drag_pose(self.phase)
         else:
-            base = idle_pose(self.phase)
+            builder = POSE_BUILDERS.get(self.state, idle_pose)
+            base = builder(self.phase)
         return StickPose(
             neck=base.neck,
             hip=base.hip,

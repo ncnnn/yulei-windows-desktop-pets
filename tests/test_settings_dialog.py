@@ -33,8 +33,7 @@ def _build_stub_modules():
             self.hotkeys_enabled = True
             self.check_updates = True
             self.reduce_motion = False
-            self.glass_enabled = True
-            self.corner_radius = 14
+            self.frosted_ui_enabled = True
             self.version = 2
             self._saved = []
             for key, value in kwargs.items():
@@ -86,6 +85,7 @@ for _name, _mod in _STUBS.items():
     sys.modules[_name] = _mod
 
 import pytest  # noqa: E402
+from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
     QApplication,
     QCheckBox,
@@ -140,8 +140,6 @@ class FakeWindow:
     def set_reduce_motion(self, value):
         self.reduce_motion = bool(value)
 
-    def apply_glass_plan(self, plan):
-        self.glass_plan = plan
 
 
 class FakeController:
@@ -200,7 +198,7 @@ class FakeRuntime:
         }
         self.controller = FakeController()
         self.calls = []
-        self.glass = None
+        self.frosted = None
 
     def set_volume(self, value):
         self.volume = min(max(float(value), 0.0), 1.0)
@@ -217,9 +215,9 @@ class FakeRuntime:
         self.windows[role].set_pet_size(size)
         self.calls.append(("set_pet_size", role, size))
 
-    def set_glass(self, enabled, radius=None):
-        self.glass = (bool(enabled), int(radius if radius is not None else 14))
-        self.calls.append(("set_glass", *self.glass))
+    def set_frosted_ui(self, enabled):
+        self.frosted = bool(enabled)
+        self.calls.append(("set_frosted_ui", self.frosted))
 
     def set_role_visible(self, role, visible):
         self.windows[role].setVisible(visible)
@@ -447,22 +445,27 @@ def test_interaction_page_has_stage3_controls(app):
     assert _check(dialog, "duel_effect") is not None
 
 
-def test_appearance_page_has_glass_controls(app):
+def test_appearance_page_has_frosted_control(app):
     runtime = FakeRuntime()
     config = Config()
     dialog = SettingsDialog(runtime, config)
 
-    box = _check(dialog, "glass")
-    combo = _combo(dialog, "corner_radius")
+    box = _check(dialog, "frosted_ui")
     assert box is not None
-    assert combo is not None
-    assert combo.count() >= 4
-
-    combo.setCurrentIndex(combo.findData(20))
-    assert config.corner_radius == 20
-    assert runtime.glass == (True, 20)
+    assert box.isChecked() is True
 
     box.setChecked(False)
-    assert config.glass_enabled is False
-    assert runtime.glass == (False, 20)
+    assert config.frosted_ui_enabled is False
+    assert runtime.frosted is False
     assert config._saved
+
+    box.setChecked(True)
+    assert runtime.frosted is True
+
+
+def test_settings_dialog_is_frameless_and_translucent(app):
+    """磨砂设置窗口：无边框 + 半透明底，靠自绘圆角面板撑起观感。"""
+    dialog = SettingsDialog(FakeRuntime(), Config())
+    flags = dialog.windowFlags()
+    assert flags & Qt.WindowType.FramelessWindowHint
+    assert dialog.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)

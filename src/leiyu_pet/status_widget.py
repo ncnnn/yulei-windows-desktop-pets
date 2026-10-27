@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QRectF, Qt
+from PySide6.QtCore import QRect, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPaintEvent
 from PySide6.QtWidgets import QWidget
 
@@ -52,22 +52,37 @@ class StatusWidget(QWidget):
             self.hide()
         self.update()
 
-    def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802 - Qt 命名
-        if not self._text:
-            return
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    def _font(self) -> QFont:
         font = QFont(self.font())
         font.setPointSize(self._font_size)
         font.setBold(True)
-        painter.setFont(font)
-        metrics = QFontMetrics(font)
+        return font
+
+    def pill_rect(self) -> QRect:
+        """胶囊的控件局部矩形；没有文字时返回空矩形。
+
+        命中测试用它来判定「这一像素是否有东西」——整条状态栏都是透明的，
+        只有胶囊本体吃点击。
+        """
+        if not self._text:
+            return QRect()
+        metrics = QFontMetrics(self._font())
         text_width = metrics.horizontalAdvance(self._text)
         width = min(self.width() - 4, text_width + PADDING_X * 2)
         height = metrics.height() + PADDING_Y * 2
-        rect = QRectF((self.width() - width) / 2.0, 1.0, width, height)
+        return QRect(int((self.width() - width) / 2.0), 1, int(width), int(height))
+
+    def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802 - Qt 命名
+        rect = self.pill_rect()
+        if rect.isEmpty():
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setFont(self._font())
+        height = rect.height()
+        bubble = QRectF(rect)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(BACKGROUND)
-        painter.drawRoundedRect(rect, height / 2.0, height / 2.0)
+        painter.drawRoundedRect(bubble, height / 2.0, height / 2.0)
         painter.setPen(FOREGROUND)
-        painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, self._text)
+        painter.drawText(bubble, Qt.AlignmentFlag.AlignCenter, self._text)

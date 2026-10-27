@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QObject, QPoint, Signal
+from PySide6.QtWidgets import QMenu
 
 from leiyu_pet.manifest import load_asset_pack
 from leiyu_pet.runtime import PetRuntime
@@ -350,68 +351,104 @@ def test_auto_dialog_respects_zero_chance_and_cooldown(asset_pack_factory) -> No
         runtime.close()
 
 
-def test_set_glass_applies_plan_to_both_windows_and_persists(
+def test_set_frosted_ui_persists_and_logs_degrade(
     asset_pack_factory, monkeypatch, tmp_path
 ) -> None:
-    """面板开关要同时落到两只窗口，并写回配置；关掉后半径仍记住。"""
+    """磨砂开关只写配置，不碰桌宠窗口（主窗口必须保持绝对透明）。"""
     from leiyu_pet import paths
     from leiyu_pet import runtime as runtime_module
     from leiyu_pet.config import Config
 
     monkeypatch.setattr(paths, "config_path", lambda: tmp_path / "config.json")
-    monkeypatch.setattr(runtime_module, "display_capabilities", lambda: (True, False))
+    monkeypatch.setattr(runtime_module.frosted_ui, "current_plan", _degraded_plan)
 
     pack = load_asset_pack(asset_pack_factory())
     runtime = PetRuntime(pack, audio=FakeAudio(), show=False)
     runtime.config = Config()
     try:
-        runtime.set_glass(True, 20)
-        for window in runtime.windows.values():
-            assert window.glass_enabled is True
-            assert window.glass_frosted is True
-            assert window.glass_radius == 20
-        assert runtime.glass_enabled is True
-        assert runtime.config.glass_enabled is True
-        assert runtime.config.corner_radius == 20
+        runtime.set_frosted_ui(False)
+        assert runtime.frosted_enabled is False
+        assert runtime.config.frosted_ui_enabled is False
+        assert runtime.frosted_plan.reason == "no-acrylic-api"
 
-        runtime.set_glass(False, 20)
-        for window in runtime.windows.values():
-            assert window.glass_enabled is False
-        assert runtime.config.glass_enabled is False
-        assert runtime.config.corner_radius == 20
+        runtime.set_frosted_ui(True)
+        assert runtime.config.frosted_ui_enabled is True
     finally:
         runtime.close()
 
 
-def test_set_glass_degrades_on_a_remote_session(asset_pack_factory, monkeypatch) -> None:
-    from leiyu_pet import runtime as runtime_module
+def test_frosted_toggle_does_not_touch_pet_windows(asset_pack_factory) -> None:
+    pack = load_asset_pack(asset_pack_factory())
+    runtime = PetRuntime(pack, audio=FakeAudio(), show=False)
+    try:
+        before = {role: window.windowFlags() for role, window in runtime.windows.items()}
+        runtime.set_frosted_ui(True)
+        after = {role: window.windowFlags() for role, window in runtime.windows.items()}
+        assert before == after
+    finally:
+        runtime.close()
 
-    monkeypatch.setattr(runtime_module, "display_capabilities", lambda: (True, True))
+
+def _degraded_plan(*_args, **_kwargs):
+    from leiyu_pet.frosted import plan_frosted
+
+    return plan_frosted(enabled=True, acrylic_available=False)
+
+
+def test_context_menu_exposes_frosted_toggle_and_action_submenu(asset_pack_factory) -> None:
+    """菜单里要有磨砂开关与「让 TA 做个动作」的十二个动作。"""
+    from leiyu_pet.stick_body import ACTION_LABELS, RANDOM_ACTIONS
 
     pack = load_asset_pack(asset_pack_factory())
     runtime = PetRuntime(pack, audio=FakeAudio(), show=False)
     try:
-        runtime.set_glass(True, 14)
+        menu = runtime.menu_manager.show("lei", QPoint(5, 5))
+        texts = [action.text() for action in menu.actions()]
+        assert "磨砂菜单与设置" in texts
+        action_menu = next(
+            sub for sub in menu.findChildren(QMenu) if sub.title() == "让 TA 做个动作"
+        )
+        labels = [action.text() for action in action_menu.actions()]
+        assert labels == [ACTION_LABELS[state] for state in RANDOM_ACTIONS]
+        menu.close()
+    finally:
+        runtime.close()
+
+
+def test_menu_click_plays_the_selected_action(asset_pack_factory, monkeypatch) -> None:
+    pack = load_asset_pack(asset_pack_factory())
+    runtime = PetRuntime(pack, audio=FakeAudio(), show=False)
+    played: list[tuple[str, str]] = []
+    try:
         window = runtime.windows["lei"]
-        assert window.glass_enabled is True
-        assert window.glass_frosted is False
-        assert window.glass_radius == 14
-        assert window.glass_plan.reason == "remote-session"
+        monkeypatch.setattr(
+            window, "play_stick_action", lambda state, seconds=2.0: played.append((state, seconds))
+        )
+        menu = runtime.menu_manager.show("lei", QPoint(5, 5))
+        action_menu = next(
+            sub for sub in menu.findChildren(QMenu) if sub.title() == "让 TA 做个动作"
+        )
+        heart = next(a for a in action_menu.actions() if a.text() == "比心")
+        heart.trigger()
+        assert played and played[0][0] == "heart"
+        menu.close()
     finally:
         runtime.close()
 
 
-def test_toggle_glass_flips_state(asset_pack_factory, monkeypatch, tmp_path) -> None:
-    from leiyu_pet import paths
-
-    monkeypatch.setattr(paths, "config_path", lambda: tmp_path / "config.json")
-
+def test_menu_gets_a_stylesheet_when_frosted(asset_pack_factory) -> None:
+    """磨砂开启时菜单要有半透明样式；关闭时不能残留样式。"""
     pack = load_asset_pack(asset_pack_factory())
     runtime = PetRuntime(pack, audio=FakeAudio(), show=False)
     try:
-        assert runtime.toggle_glass() is False
-        assert runtime.glass_enabled is False
-        assert runtime.toggle_glass() is True
-        assert runtime.windows["yu"].glass_enabled is True
+        runtime.set_frosted_ui(True)
+        menu = runtime.menu_manager.show("lei", QPoint(5, 5))
+        assert "border-radius" in menu.styleSheet()
+        menu.close()
+
+        runtime.set_frosted_ui(False)
+        menu = runtime.menu_manager.show("lei", QPoint(5, 5))
+        assert menu.styleSheet() == ""
+        menu.close()
     finally:
         runtime.close()

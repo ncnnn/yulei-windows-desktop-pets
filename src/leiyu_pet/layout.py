@@ -1,6 +1,7 @@
 """窗口几何的纯计算：不导入 Qt，方便单测。
 
-窗口由三部分垂直堆叠：头部盒子、火柴人躯体、字幕气泡。头部盒子的大小
+窗口由三部分垂直堆叠：头部盒子、火柴人躯体、字幕气泡。窗口本身**不画任何底**，
+除了大头像素与火柴人线条之外全部透明（命中测试也按这个口径判定）。头部盒子的大小
 与位置始终等于旧版（``pet_size`` 见方），所以「加躯体」只是把窗口向下
 加高，头像像素一个都不缩。
 
@@ -18,8 +19,6 @@ PAD_X = 48
 TOP = 16
 #: 头部下方留给字幕气泡的高度。
 BOTTOM_EXTRA = 112
-#: 半透明面板比人物可见范围向外扩出的边距（与 glass.PANEL_PAD 保持一致）。
-PANEL_PAD = 10
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,19 +56,6 @@ def head_box(pet_size: int) -> Box:
     """头部绘制盒子（窗口局部坐标）。"""
     size = float(pet_size)
     return Box(float(PAD_X), float(TOP), size, size)
-
-
-def panel_box(pet_size: int, content_bottom: float) -> Box:
-    """半透明面板的矩形：横向以头部为中心外扩，纵向从头顶包到脚底。
-
-    面板左右各扩 ``PANEL_PAD``，比头部盒子窄——窗口本身还有 ``PAD_X`` 的透明
-    边距，面板不会顶到窗口边缘，拖拽热区也就不会扩展到看不见的地方。
-    """
-    size = float(pet_size)
-    left = float(PAD_X - PANEL_PAD)
-    top = float(TOP - PANEL_PAD)
-    bottom = max(float(TOP + size), float(content_bottom)) + PANEL_PAD
-    return Box(left, top, size + 2 * PANEL_PAD, bottom - top)
 
 
 def legacy_window_height(pet_size: int) -> int:
