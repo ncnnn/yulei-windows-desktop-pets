@@ -67,9 +67,6 @@ SHADOW_MARGIN = 14
 #: 设置窗口的高度范围：贴着内容走，太矮没法看、太高顶出屏幕。
 MIN_HEIGHT = 380
 MAX_HEIGHT = 720
-#: 设置窗口的高度范围：贴着内容走，太矮没法看、太高顶出屏幕。
-MIN_HEIGHT = 380
-MAX_HEIGHT = 720
 
 
 class SettingsDialog(QDialog):
@@ -92,9 +89,9 @@ class SettingsDialog(QDialog):
         titles = QVBoxLayout()
         titles.setContentsMargins(0, 0, 0, 0)
         titles.setSpacing(1)
-        self._title = QLabel(APP_NAME)
+        self._title = QLabel("设置")
         self._title.setObjectName("dialog_title")
-        self._subtitle = QLabel(f"设置 · v{__version__}")
+        self._subtitle = QLabel(f"版本 v{__version__}")
         self._subtitle.setObjectName("dialog_subtitle")
         titles.addWidget(self._title)
         titles.addWidget(self._subtitle)
@@ -178,16 +175,6 @@ class SettingsDialog(QDialog):
         box.addStretch(1)
         return row
 
-    @staticmethod
-    def _left_aligned(widget: QWidget) -> QWidget:
-        """把按钮放进一个左对齐的容器，避免被表单拉成整行宽的色条。"""
-        row = QWidget()
-        box = QHBoxLayout(row)
-        box.setContentsMargins(0, 4, 0, 0)
-        box.addWidget(widget)
-        box.addStretch(1)
-        return row
-
     def _current_page(self) -> QWidget | None:
         widget = self._tabs.widget(self._tabs.currentIndex())
         if isinstance(widget, QScrollArea):
@@ -211,75 +198,6 @@ class SettingsDialog(QDialog):
         area.setWidget(page)
         return area
 
-    def _fit_to_content(self, *_args) -> None:
-        """窗口高度贴着当前页签的内容走。
-
-        页签之间内容量差得远（声音 5 行、互动 3 组卡片），固定高度总会有一页
-        空一大块；这里按内容算高度，超出上限才交给滚动条。
-        """
-        page = self._current_page()
-        width, height = 560, MAX_HEIGHT
-        if page is not None:
-            chrome = (
-                self._layout.contentsMargins().top()
-                + self._layout.contentsMargins().bottom()
-                + self._header.sizeHint().height()
-                + self._rule.height()
-                + self._buttons.sizeHint().height()
-                + self._layout.spacing() * 3
-                + self._tabs.tabBar().sizeHint().height()
-                + 12
-            )
-            height = min(MAX_HEIGHT, max(MIN_HEIGHT, chrome + page.sizeHint().height()))
-        screen = QGuiApplication.primaryScreen()
-        if screen is not None:
-            available = screen.availableGeometry()
-            width = min(width, int(available.width() * 0.9))
-            height = min(height, int(available.height() * 0.88))
-        self.resize(width, height)
-
-    @staticmethod
-    def _left_aligned(widget: QWidget) -> QWidget:
-        """把按钮放进一个左对齐的容器，避免被表单拉成整行宽的色条。"""
-        row = QWidget()
-        box = QHBoxLayout(row)
-        box.setContentsMargins(0, 4, 0, 0)
-        box.addWidget(widget)
-        box.addStretch(1)
-        return row
-
-    @staticmethod
-    def _left_aligned(widget: QWidget) -> QWidget:
-        """把按钮放进一个左对齐的容器，避免被表单拉成整行宽的色条。"""
-        row = QWidget()
-        box = QHBoxLayout(row)
-        box.setContentsMargins(0, 4, 0, 0)
-        box.addWidget(widget)
-        box.addStretch(1)
-        return row
-
-    def _current_page(self) -> QWidget | None:
-        widget = self._tabs.widget(self._tabs.currentIndex())
-        if isinstance(widget, QScrollArea):
-            return widget.widget()
-        return widget
-
-    def _scrollable(self, page: QWidget) -> QScrollArea:
-        """把页签内容装进滚动区：内容多就滚，不再把窗口撑到屏幕外。"""
-        page.setObjectName("tab_page")
-        page.setAutoFillBackground(False)
-        area = QScrollArea(self)
-        area.setWidgetResizable(True)
-        area.setFrameShape(QFrame.Shape.NoFrame)
-        area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        viewport = area.viewport()
-        viewport.setObjectName("scroll_viewport")
-        viewport.setAutoFillBackground(False)
-        viewport.setStyleSheet(
-            "QWidget#scroll_viewport { background: transparent; }"
-        )
-        area.setWidget(page)
-        return area
 
     # ------------------------------------------------------------ 磨砂材质
 
@@ -851,14 +769,16 @@ class SettingsDialog(QDialog):
         self._persist()
 
     def _refresh_volume_hint(self, percent: int) -> None:
-        """音量低于 20% 时，决战模式的 20%→70% 阶梯会被压平，需要说明。"""
-        if percent < 20:
+        """音量偏低时说明决战模式的渐强听不出来，避免被当成「没声音」。"""
+        if percent < 40:
             self.volume_hint.setText(
-                "⚠ 当前音量低于 20%：决战模式每句都会按当前音量播放，"
-                "听不出 20%→70% 的阶梯。"
+                "⚠ 当前音量偏低：决战模式的渐强在轻声下几乎听不出来，"
+                "建议调到 40% 以上。"
             )
         else:
-            self.volume_hint.setText("决战模式会在这个音量以下逐句从 20% 升到 70%。")
+            self.volume_hint.setText(
+                "决战模式会在你设定的音量内，由 55% 逐句渐强到 100%。"
+            )
 
     def _set_voice(self, mode: str) -> None:
         self.runtime.controller.set_voice_mode(mode)

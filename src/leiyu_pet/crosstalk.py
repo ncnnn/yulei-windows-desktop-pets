@@ -18,9 +18,13 @@ DEFAULT_LINES = 6
 #: 菜单里提供的快捷句数，避免用户面对一个无意义的自由输入框。
 LINE_PRESETS = (4, 6, 8, 10, 12)
 
-#: 决战模式的逐句音量：第一句 20%，最后一句 70%，中间线性递增。
-BATTLE_START_VOLUME = 0.20
-BATTLE_END_VOLUME = 0.70
+#: 决战模式的逐句音量：以用户当前音量为 100%，第一句 55%，最后一句 100%。
+#: 一定要用「倍率」而不是绝对音量——旧实现把第一句定成绝对 20%，乘上
+#: 用户 65% 的总音量只有 13%（约 -18 dB），笔记本喇叭上等于没声。
+BATTLE_START_VOLUME = 0.55
+BATTLE_END_VOLUME = 1.00
+#: 总音量低于这个值时，渐强的落差在听觉上几乎听不出来，需要提示用户。
+BATTLE_HINT_VOLUME = 0.40
 
 
 def clamp_lines(lines: int) -> int:
@@ -76,10 +80,10 @@ def commands_from_pairs(
 
 
 def battle_multipliers(count: int) -> list[float]:
-    """决战模式每句的阶梯目标音量：0.20 线性升到 0.70。
+    """决战模式每句相对用户总音量的倍率：0.55 线性升到 1.00。
 
-    名字沿用「multiplier」，但返回的是**绝对目标音量**（0.20-0.70）；
-    实际播放音量由 ``PetController`` 取 ``min(目标值, 用户当前音量)``。
+    返回的是**倍率**，``PetController`` 用 ``用户音量 × 倍率`` 得到绝对音量，
+    因此永远不会比用户设定更吵；倍率下限 0.55 保证第一句也听得清。
     """
     total = max(1, int(count))
     if total == 1:

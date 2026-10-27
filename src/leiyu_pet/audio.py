@@ -23,7 +23,14 @@ from PySide6.QtCore import QObject, QTimer, QUrl, Signal
 from .models import Clip, Role
 
 _END_OF_MEDIA = "EndOfMedia"
-_START_TIMEOUT_MS = 2000
+_START_TIMEOUT_MS = 2500
+#: 这些状态下后端还没真正出声：如果此时 player 不在 PlayingState，补一次 play()。
+#: Qt 的 WMF 后端在 ``stop() → setSource() → play()`` 连发时偶发吞掉 play，
+#: 表现为「气泡在走、字幕在动，但没有声音」。
+_PENDING_START_STATES = ("LoadedMedia", "BufferedMedia")
+_MAX_PLAY_RETRIES = 2
+#: 加载偏慢时多给一轮宽限，避免正常但慢的机器被误报成「没有后端」。
+_MAX_GRACE = 1
 
 
 def _create_player() -> Any:
@@ -62,6 +69,7 @@ class AudioCoordinator(QObject):
         self._role: Role | None = None
         self._clip_id: int | None = None
         self._playing = False
+        self._grace = 0
         self._token = 0
         self._hooks: list[tuple[Any, Any]] = []
         self._watchdog = QTimer(self)
@@ -85,22 +93,32 @@ class AudioCoordinator(QObject):
         self._reset()
         token = self._token
         clip_id = clip.id
+        self._grace = _MAX_GRACE
+        retries = 0
 
         def on_position(milliseconds: int) -> None:
             if token == self._token:
                 self.position_changed.emit(role, clip_id, milliseconds / 1000.0)
 
         def on_status(status: Any) -> None:
+            nonlocal retries
             name = getattr(status, "name", "")
             if token != self._token:
                 return
-            if name and name != "NoMedia":
-                # 一旦进入加载/缓冲/播放等状态，说明后端已接手，无需再兜底。
-                self._watchdog.stop()
-            if name != _END_OF_MEDIA:
+            if name == _END_OF_MEDIA:
+                self._reset()
+                self.finished.emit(role, clip_id)
                 return
-            self._reset()
-            self.finished.emit(role, clip_id)
+            if not name or name == "NoMedia":
+                return
+            # 后端已接手：真正的播放中才停掉兜底计时。
+            if self._is_playing() or self._position() > 0:
+                self._watchdog.stop()
+                return
+            if name in _PENDING_START_STATES and retries < _MAX_PLAY_RETRIES:
+                # 已加载但没有播放态：补一次 play，把被吞掉的那一句救回来。
+                retries += 1
+                self._player.play()
 
         def on_error(error: Any, message: str) -> None:
             if token != self._token:
@@ -156,17 +174,32 @@ class AudioCoordinator(QObject):
         self._playing = False
         self._token += 1
 
+    def _is_playing(self) -> bool:
+        """当前是否真的在出声（不是「已加载但停着」）。"""
+        get_state = getattr(self._player, "playbackState", None)
+        if not callable(get_state):
+            return False
+        try:
+            state = get_state()
+        except (TypeError, ValueError):
+            return False
+        return getattr(state, "name", "") == "PlayingState"
+
+    def _position(self) -> int:
+        get_position = getattr(self._player, "position", None)
+        if not callable(get_position):
+            return 0
+        try:
+            return int(get_position())
+        except (TypeError, ValueError):
+            return 0
+
     def _check_started(self) -> None:
-        """兜底：若迟迟没有进入加载/播放状态，说明缺少多媒体后端或无法解码。"""
+        """兜底：迟迟没有进入播放态，说明后端吞了 play 或无法解码。"""
         if not self._playing:
             return
-        position = 0
-        get_position = getattr(self._player, "position", None)
-        if callable(get_position):
-            try:
-                position = int(get_position())
-            except (TypeError, ValueError):
-                position = 0
+        if self._is_playing() or self._position() > 0:
+            return
         status = None
         get_status = getattr(self._player, "mediaStatus", None)
         if callable(get_status):
@@ -175,9 +208,13 @@ class AudioCoordinator(QObject):
             except (TypeError, ValueError):
                 status = None
         name = getattr(status, "name", "")
-        if position <= 0 and name in ("", "NoMedia", "LoadingMedia"):
-            self._reset()
-            self.error.emit("音频未能开始播放：缺少多媒体后端或音频格式不受支持")
+        if name in ("LoadingMedia", "LoadedMedia", "BufferedMedia") and self._grace > 0:
+            # 还在加载：再宽限一轮，别把「机器慢」误判成「没有后端」。
+            self._grace -= 1
+            self._watchdog.start()
+            return
+        self._reset()
+        self.error.emit("音频未能开始播放：缺少多媒体后端或音频格式不受支持")
 
     def _busy(self) -> bool:
         return self._playing or bool(self._hooks)

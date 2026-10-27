@@ -98,6 +98,7 @@ from PySide6.QtWidgets import (  # noqa: E402
     QSlider,
 )
 
+from leiyu_pet import __version__  # noqa: E402
 from leiyu_pet.autostart import is_enabled  # noqa: E402
 from leiyu_pet.config import Config  # noqa: E402
 from leiyu_pet.settings_dialog import COPYRIGHT_NOTICE, ROLES, SettingsDialog  # noqa: E402
@@ -435,11 +436,11 @@ def test_volume_hint_warns_below_battle_ladder(app):
     dialog = SettingsDialog(FakeRuntime(), Config())
 
     dialog._on_volume(10)
-    assert "低于 20%" in dialog.volume_hint.text()
+    assert "音量偏低" in dialog.volume_hint.text()
 
     dialog._on_volume(60)
-    assert "20%" in dialog.volume_hint.text()
-    assert "低于 20%" not in dialog.volume_hint.text()
+    assert "55%" in dialog.volume_hint.text()
+    assert "音量偏低" not in dialog.volume_hint.text()
 
 
 def test_interaction_page_has_stage3_controls(app):
@@ -482,6 +483,16 @@ def test_window_title_uses_the_new_product_name(app):
     dialog = SettingsDialog(FakeRuntime(), Config())
     assert "鱼雷双桌宠" in dialog.windowTitle()
     assert "雷余" not in dialog.windowTitle()
+
+
+def test_header_shows_only_settings_and_version(app):
+    """标题行不再重复产品名：界面里只留「设置 + 版本」。"""
+    dialog = SettingsDialog(FakeRuntime(), Config())
+
+    assert dialog._title.text() == "设置"
+    assert "鱼雷双桌宠" not in dialog._title.text()
+    assert "鱼雷双桌宠" not in dialog._subtitle.text()
+    assert __version__ in dialog._subtitle.text()
 
 
 def test_every_tab_is_scrollable(app):

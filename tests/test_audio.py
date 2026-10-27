@@ -42,6 +42,7 @@ class FakePlayer(QObject):
         self.stop_calls = 0
         self.position_value = 0
         self.status: NamedStatus = NamedStatus("NoMedia")
+        self.state: NamedStatus = NamedStatus("StoppedState")
 
     def setAudioOutput(self, output: object) -> None:
         self.output = output
@@ -60,6 +61,9 @@ class FakePlayer(QObject):
 
     def mediaStatus(self) -> NamedStatus:
         return self.status
+
+    def playbackState(self) -> NamedStatus:
+        return self.state
 
     def emit_position(self, milliseconds: int) -> None:
         self.position_value = milliseconds
@@ -266,6 +270,43 @@ def test_watchdog_stays_silent_after_position_advances(bundle: Bundle, tmp_path:
 
     assert "error" not in bundle.recorder.names()
     assert bundle.coordinator.is_playing is True
+
+
+def test_loaded_media_without_playing_state_retries_play(
+    bundle: Bundle, tmp_path: Path
+) -> None:
+    """Qt 的 WMF 后端偶发吞掉 play()：已加载但停在 StoppedState 时要补一次。"""
+    bundle.coordinator.play("lei", clip(1), tmp_path / "a.mp3")
+    assert bundle.player.play_calls == 1
+
+    bundle.player.emit_status(NamedStatus("LoadedMedia"))
+
+    assert bundle.player.play_calls == 2
+    assert bundle.coordinator.is_playing is True
+    assert "error" not in bundle.recorder.names()
+
+
+def test_retry_stops_once_playback_actually_runs(bundle: Bundle, tmp_path: Path) -> None:
+    bundle.coordinator.play("lei", clip(1), tmp_path / "a.mp3")
+    bundle.player.state = NamedStatus("PlayingState")
+    bundle.player.emit_status(NamedStatus("BufferedMedia"))
+
+    assert bundle.player.play_calls == 1
+
+
+def test_watchdog_grants_one_extra_round_while_loading(
+    bundle: Bundle, tmp_path: Path
+) -> None:
+    """加载慢不算故障：宽限一轮后再判定，避免机器慢被误报成「没有后端」。"""
+    bundle.coordinator.play("lei", clip(1), tmp_path / "a.mp3")
+    bundle.player.emit_status(NamedStatus("LoadingMedia"))
+
+    bundle.coordinator._check_started()
+    assert "error" not in bundle.recorder.names()
+    assert bundle.coordinator.is_playing is True
+
+    bundle.coordinator._check_started()
+    assert bundle.recorder.events[-1][0] == "error"
 
 
 def test_default_player_and_output_are_created() -> None:

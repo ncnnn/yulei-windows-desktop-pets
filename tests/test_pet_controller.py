@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
+import pytest
 from PySide6.QtCore import QObject, Signal
 
 from leiyu_pet.manifest import load_asset_pack
@@ -367,14 +368,14 @@ def test_battle_rises_volume_and_restores(asset_pack_factory) -> None:
 
     assert controller.start_battle(4) is True
     assert controller.mode == "battle"
-    assert volumes == [0.2]
+    assert volumes == [0.55]
 
     for _ in range(4):
         role, clip_id, _path = audio.calls[-1]
         audio.is_playing = False
         audio.finished.emit(role, clip_id)
 
-    assert volumes == [0.2, 0.367, 0.533, 0.7, 1.0]
+    assert volumes == [0.55, 0.7, 0.85, 1.0]
     assert controller.mode == "idle"
 
 
@@ -389,12 +390,29 @@ def test_battle_never_exceeds_user_volume(asset_pack_factory) -> None:
 
     controller.start_battle(4)
 
-    assert volumes == [0.2]
+    assert volumes == [pytest.approx(0.165)]
     role, clip_id, _path = audio.calls[-1]
     audio.is_playing = False
     audio.finished.emit(role, clip_id)
-    assert volumes[-1] == 0.3
-    assert notices == []  # 30% ≥ 20%，无需提示
+    assert volumes[-1] == pytest.approx(0.21)
+    assert all(value <= 0.3 + 1e-9 for value in volumes)
+    # 30% 低于 40%：提示渐强听不出来，但依然按倍率播放。
+    assert notices and "40%" in notices[0]
+
+
+def test_battle_follows_volume_change_mid_playback(asset_pack_factory) -> None:
+    """渐强播放中拖音量滑块，应当立刻按当前倍率跟着变。"""
+    controller, _windows, audio = build_controller(asset_pack_factory)
+    volumes: list[float] = []
+    audio.set_volume = volumes.append  # type: ignore[method-assign]
+    controller.set_volume(0.5)
+    volumes.clear()
+
+    controller.start_battle(4)
+    assert volumes == [pytest.approx(0.275)]
+
+    controller.set_volume(0.8)
+    assert volumes[-1] == pytest.approx(0.44)
 
 
 def test_battle_hints_when_volume_below_ladder(asset_pack_factory) -> None:
@@ -405,7 +423,7 @@ def test_battle_hints_when_volume_below_ladder(asset_pack_factory) -> None:
 
     controller.start_battle(4)
 
-    assert notices and "20%" in notices[0]
+    assert notices and "40%" in notices[0]
 
 
 def test_battle_and_crosstalk_are_mutually_exclusive(asset_pack_factory) -> None:

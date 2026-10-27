@@ -12,7 +12,7 @@ from typing import Protocol, cast
 from PySide6.QtCore import QObject, QTimer, Signal
 
 from .crosstalk import (
-    BATTLE_START_VOLUME,
+    BATTLE_HINT_VOLUME,
     DEFAULT_LINES,
     CrosstalkDirector,
     battle_multipliers,
@@ -84,6 +84,8 @@ class PetController(QObject):
         self.playback_rate = 1.0
         #: 用户设置的总音量；决战模式的逐句音量不会超过它。
         self.base_volume = 0.65
+        #: 当前这句相对总音量的倍率（1.0 = 不覆盖），播放中调音量要按它重算。
+        self._volume_factor = 1.0
         self._volume_overridden = False
         #: 常驻状态气泡（番茄钟倒计时），说话时让位给台词。
         self._status_role: Role | None = None
@@ -347,10 +349,11 @@ class PetController(QObject):
         return True
 
     def start_battle(self, lines: int | None = None) -> bool:
-        """决战模式：同样是相声的问答节奏，但每句音量从 20% 递增到 70%。
+        """决战模式：同样是相声的问答节奏，每句音量从 55% 渐强到当前音量。
 
-        音量按「不超过用户当前设置」处理：用户把总音量调到 30%，决战就不会
-        突然比平时更吵；静音状态下依然保持静音。
+        音量按「相对用户设置」的倍率处理：用户把总音量调到 30%，整段都会跟着
+        变轻但仍有渐强；静音状态下依然保持静音。起点定在 55%（而不是更低的
+        20%）是因为绝对 20% 在笔记本喇叭上基本等于静音，会被当成 bug。
         """
         if not self.both_visible():
             return False
@@ -361,10 +364,10 @@ class PetController(QObject):
             PlaybackCommand(command.role, command.clip_id, volume)
             for command, volume in zip(commands, volumes, strict=True)
         ]
-        if self.base_volume < BATTLE_START_VOLUME - 1e-9:
+        if self.base_volume < BATTLE_HINT_VOLUME - 1e-9:
             self.notice.emit(
-                f"决战模式需要音量 ≥20% 才能听出 20%→70% 的阶梯，"
-                f"当前 {round(self.base_volume * 100)}%，已按当前音量播放"
+                f"当前音量 {round(self.base_volume * 100)}% 偏低，"
+                f"决战模式的渐强听不太出来，建议调到 {round(BATTLE_HINT_VOLUME * 100)}% 以上"
             )
         self.dialogue.cancel()
         self._enter_mode("battle")
@@ -422,21 +425,23 @@ class PetController(QObject):
         self._apply_command_volume(command.volume)
         self.audio.play(command.role, clip, path)
 
-    def _apply_command_volume(self, volume: float | None) -> None:
-        """应用本句音量；None 表示回到用户设置的总音量。"""
-        if volume is None:
+    def _apply_command_volume(self, factor: float | None) -> None:
+        """应用本句音量倍率；None 表示回到用户设置的总音量。
+
+        ``factor`` 是**相对倍率**（1.0 = 原样），不是绝对音量：这样保证任何
+        模式都不会比用户设定的音量更吵，也不会因为用户音量本来就低而把
+        第一句压成 13% 那种听不见的水平。
+        """
+        if factor is None or factor >= 0.999:
             self._restore_volume()
             return
-        target = max(0.0, min(float(volume), 1.0))
-        if self.base_volume > 0.001:
-            target = min(target, self.base_volume)
-        else:
-            # 静音状态下不因为决战模式突然出声。
-            target = 0.0
-        self.audio.set_volume(target)
+        target = max(0.0, min(float(factor), 1.0))
+        self._volume_factor = target
+        self.audio.set_volume(self.base_volume * target)
         self._volume_overridden = True
 
     def _restore_volume(self) -> None:
+        self._volume_factor = 1.0
         if not self._volume_overridden:
             return
         self.audio.set_volume(self.base_volume)
@@ -509,7 +514,10 @@ class PetController(QObject):
 
     def set_volume(self, volume: float) -> None:
         self.base_volume = min(max(float(volume), 0.0), 1.0)
-        if not self._volume_overridden:
+        if self._volume_overridden:
+            # 决战/渐强播放中拖动滑块：立刻按当前倍率跟着变，而不是等下一句。
+            self.audio.set_volume(self.base_volume * self._volume_factor)
+        else:
             self.audio.set_volume(self.base_volume)
 
     def set_rate(self, rate: float) -> None:
